@@ -17,6 +17,7 @@ pub mod claude;
 pub mod codex;
 pub mod cursor;
 pub mod opencode;
+pub mod pi;
 
 use std::path::PathBuf;
 
@@ -86,7 +87,7 @@ pub struct Translation {
 pub const BUILTINS: [&str; 4] = ["control", "review", "edit", "full"];
 
 /// CLIs `wteam permissions` shows by default.
-pub const DEFAULT_CLIS: [&str; 4] = ["claude", "codex", "opencode", "cursor"];
+pub const DEFAULT_CLIS: [&str; 5] = ["claude", "codex", "opencode", "pi", "cursor"];
 
 /// Parse `Bash(git commit *)`, `Read(src/**)`, `Edit(x)`, `WebFetch(domain:x)` or a bare tool name.
 pub fn parse_rule(s: &str) -> Result<Rule> {
@@ -252,15 +253,18 @@ pub(crate) fn tool_pattern(r: &Rule) -> Option<(&'static str, String)> {
     }
 }
 
-/// Translate `profile` for `cli` (`claude|codex|opencode|cursor|fake`). `role` names generated files.
+/// Translate `profile` for `cli` (`claude|codex|opencode|pi|cursor|fake`). `role` names generated files.
 pub fn translate(cli: &str, profile: &Profile, role: &str) -> Result<Translation> {
     match cli {
         "claude" => claude::translate(profile, role),
         "codex" => codex::translate(profile, role),
         "opencode" => opencode::translate(profile, role),
+        "pi" => pi::translate(profile, role),
         "cursor" => cursor::translate(profile, role),
         "fake" => Ok(Translation::default()),
-        other => bail!("unknown cli `{other}`; expected claude, codex, opencode, cursor or fake"),
+        other => {
+            bail!("unknown cli `{other}`; expected claude, codex, opencode, pi, cursor or fake")
+        }
     }
 }
 

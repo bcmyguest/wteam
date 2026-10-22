@@ -5,6 +5,7 @@ pub mod claude;
 pub mod codex;
 pub mod fake;
 pub mod opencode;
+pub mod pi;
 
 use std::path::PathBuf;
 
@@ -69,12 +70,15 @@ pub fn for_cli(cli: &str) -> Result<Box<dyn Adapter>> {
         "claude" => Box::new(claude::Claude),
         "codex" => Box::new(codex::Codex),
         "opencode" => Box::new(opencode::Opencode),
+        "pi" => Box::new(pi::Pi),
         "fake" => Box::new(fake::Fake),
         "cursor" => bail!(
             "the cursor adapter is not implemented yet (second wave); its permissions translate"
         ),
         other => {
-            bail!("unknown agent cli `{other}` (expected claude, codex, opencode, cursor or fake)")
+            bail!(
+                "unknown agent cli `{other}` (expected claude, codex, opencode, pi, cursor or fake)"
+            )
         }
     })
 }
