@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a161bc-1eb6-7643-8769-56cc201d03b5"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"loading hooks from both ~/.codex/hooks.json and ~/.codex/config.toml; prefer a single representation for this layer"}}
+{"type":"turn.started"}
+{"type":"error","message":"You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Oct 22nd, 2026 3:20 AM."}
+{"type":"turn.failed","error":{"message":"You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Oct 22nd, 2026 3:20 AM."}}

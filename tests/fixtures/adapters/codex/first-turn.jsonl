@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a161bc-1eb6-7643-8769-56cc201d03b5"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"thinking"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"working on it"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"ls","aggregated_output":"","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"ok"}}
+{"type":"turn.completed","usage":{"input_tokens":29135,"cached_input_tokens":15872,"output_tokens":304}}
