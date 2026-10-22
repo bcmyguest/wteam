@@ -2,8 +2,10 @@
 //! The file is the record; a transport delivers new bytes past
 //! `AgentState::mail_delivered`.
 //!
-//! Each message is `---`, a header (`from:`, `at:`, optional `ticket:`), a blank
-//! line, then the body.
+//! Each message is the marker line [`MARKER`], a header (`from:`, `at:`, optional
+//! `ticket:`, `length:`), a blank line, then the body. `length:` is the body's
+//! byte length, so [`parse`] skips the body without scanning it: a body may
+//! contain `---`, `from: x` or even a marker line without splitting the message.
 
 use std::io::{Read, Seek, SeekFrom, Write};
 
@@ -11,6 +13,9 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::paths::Paths;
+
+/// First line of every message.
+const MARKER: &str = "--- wteam-mail ---";
 
 /// One parsed mailbox message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -40,11 +45,12 @@ pub fn append_ticket(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let mut msg = format!("---\nfrom: {from}\nat: {at}\n");
+    let body = body.trim_end();
+    let mut msg = format!("{MARKER}\nfrom: {from}\nat: {at}\n");
     if let Some(t) = ticket {
         msg.push_str(&format!("ticket: {t}\n"));
     }
-    msg.push_str(&format!("\n{}\n\n", body.trim_end()));
+    msg.push_str(&format!("length: {}\n\n{body}\n\n", body.len()));
     let file = paths.mail_file(to);
     let mut f = std::fs::OpenOptions::new()
         .create(true)
@@ -73,36 +79,60 @@ pub fn read_from(paths: &Paths, agent: &str, offset: u64) -> Result<(String, u64
     ))
 }
 
-/// Parse mailbox text into messages.
+/// Parse mailbox text into messages. Bodies are cut by their `length:` header;
+/// a message without one ends at the next marker line.
 pub fn parse(text: &str) -> Vec<Message> {
-    let lines: Vec<&str> = text.lines().collect();
-    let starts: Vec<usize> = (0..lines.len())
-        .filter(|&i| lines[i] == "---" && lines.get(i + 1).is_some_and(|l| l.starts_with("from: ")))
-        .collect();
     let mut out = Vec::new();
-    for (n, &s) in starts.iter().enumerate() {
-        let end = starts.get(n + 1).copied().unwrap_or(lines.len());
+    let mut pos = 0;
+    while let Some(start) = next_marker(text, pos) {
         let mut msg = Message {
             from: String::new(),
             at: 0,
             ticket: None,
             body: String::new(),
         };
-        let mut i = s + 1;
-        while i < end && !lines[i].is_empty() {
-            if let Some(v) = lines[i].strip_prefix("from: ") {
-                msg.from = v.trim().to_string();
-            } else if let Some(v) = lines[i].strip_prefix("at: ") {
-                msg.at = v.trim().parse().unwrap_or(0);
-            } else if let Some(v) = lines[i].strip_prefix("ticket: ") {
-                msg.ticket = Some(v.trim().to_string());
+        let mut length = None;
+        let mut cur = start + MARKER.len() + 1;
+        while cur < text.len() {
+            let end = text[cur..].find('\n').map_or(text.len(), |i| cur + i);
+            let line = &text[cur..end];
+            cur = (end + 1).min(text.len());
+            if line.is_empty() {
+                break;
             }
-            i += 1;
+            if let Some(v) = line.strip_prefix("from: ") {
+                msg.from = v.trim().to_string();
+            } else if let Some(v) = line.strip_prefix("at: ") {
+                msg.at = v.trim().parse().unwrap_or(0);
+            } else if let Some(v) = line.strip_prefix("ticket: ") {
+                msg.ticket = Some(v.trim().to_string());
+            } else if let Some(v) = line.strip_prefix("length: ") {
+                length = v.trim().parse::<usize>().ok();
+            }
         }
-        msg.body = lines[(i + 1).min(end)..end].join("\n").trim().to_string();
+        let rest = &text[cur..];
+        let body = match length.and_then(|n| rest.get(..n)) {
+            Some(b) => b,
+            None => &rest[..next_marker(rest, 0).unwrap_or(rest.len())],
+        };
+        msg.body = body.trim().to_string();
+        pos = cur + body.len();
         out.push(msg);
     }
     out
+}
+
+/// Byte index of the next marker line at or after `from`.
+fn next_marker(text: &str, from: usize) -> Option<usize> {
+    let mut at = from;
+    while at < text.len() {
+        let end = text[at..].find('\n').map_or(text.len(), |i| at + i);
+        if &text[at..end] == MARKER {
+            return Some(at);
+        }
+        at = end + 1;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -127,6 +157,34 @@ mod tests {
         assert_eq!(all[0].ticket, None);
         assert_eq!(all[1].ticket.as_deref(), Some("03"));
         assert_eq!(all[1].body, "two\nlines");
+    }
+
+    #[test]
+    fn body_with_header_lookalikes_stays_one_message() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = Paths::new(tmp.path(), "s");
+        let nasty =
+            "diff:\n---\nfrom: x\nat: 5\n\nmore\n--- wteam-mail ---\nfrom: y\nlength: 3\n\nend";
+        append(&p, "a.1", "w.1", nasty).unwrap();
+        append(&p, "a.1", "w.2", "after").unwrap();
+        let (text, _) = read_from(&p, "a.1", 0).unwrap();
+        let msgs = parse(&text);
+        assert_eq!(msgs.len(), 2, "{msgs:?}");
+        assert_eq!(msgs[0].from, "w.1");
+        assert_eq!(msgs[0].body, nasty);
+        assert_eq!(msgs[1].body, "after");
+    }
+
+    #[test]
+    fn multibyte_bodies_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = Paths::new(tmp.path(), "s");
+        append(&p, "a.1", "w.1", "héllo ✓").unwrap();
+        append(&p, "a.1", "w.1", "next").unwrap();
+        let (text, _) = read_from(&p, "a.1", 0).unwrap();
+        let msgs = parse(&text);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].body, "héllo ✓");
     }
 
     #[test]
