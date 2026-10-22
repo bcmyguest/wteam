@@ -87,7 +87,7 @@ pub fn run(g: &Global, cmd: &Command) -> Result<Out> {
         Command::Graph(a) => graph::run(g, a),
         Command::Permissions(a) => permissions::run(g, a),
         Command::Config(c) => config::run(g, c),
-        Command::Setup(a) => setup::run(g, a),
+        Command::Setup(a) => setup::run(a),
         Command::Turn(a) => turn::run(g, a),
     }
 }

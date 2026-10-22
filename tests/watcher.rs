@@ -187,10 +187,10 @@ fn unlanded_isolation_and_transport_error() {
         .failure()
         .stderr(predicates::str::contains("unknown isolation `bogus`"));
     r.wteam()
-        .args(["run", "--transport", "herdr"])
+        .args(["run", "--transport", "bogus"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("not available yet (ticket 13)"));
+        .stderr(predicates::str::contains("unknown transport `bogus`"));
 }
 
 /// Orchestrator that dispatches, then logs one turn and tells a handoff apart by its marker.

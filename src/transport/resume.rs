@@ -301,14 +301,6 @@ fn prompt_of(text: &str) -> String {
         .join("\n\n")
 }
 
-/// Agent definition search path: project dir, then the user's config dir.
-fn search_dirs(ctx: &Ctx) -> Vec<PathBuf> {
-    vec![
-        ctx.paths.project_agents_dir(),
-        crate::config::config_dir().join("agents"),
-    ]
-}
-
 /// Write the files a translated profile needs, backing up the originals first.
 fn apply_files(paths: &crate::paths::Paths, t: &crate::permissions::Translation) -> Result<()> {
     for (rel, contents) in &t.files {
@@ -355,7 +347,9 @@ pub fn one_turn(
     foreground: bool,
 ) -> Result<String> {
     let (role, _) = parse_instance(agent);
-    let search = search_dirs(ctx);
+    let team = state::load(&ctx.paths)?.run.team;
+    let dirs = crate::config::search_dirs(&ctx.paths, &team);
+    let search = dirs.agents.clone();
     let agent_name = match ctx.team.roles.get(&role).map(|r| &r.kind) {
         Some(NodeKind::Agent { agent, .. }) => agent.clone(),
         _ => bail!("`{role}` is not an agent role in team `{}`", ctx.team.name),
@@ -365,12 +359,8 @@ pub fn one_turn(
     let permissions = if def.cli == "fake" {
         Default::default()
     } else {
-        let profiles = [
-            ctx.paths.project_profiles_dir(),
-            crate::config::config_dir().join("profiles"),
-        ];
         let profile =
-            crate::permissions::load(def.profile.as_deref().unwrap_or("edit"), &profiles)?;
+            crate::permissions::load(def.profile.as_deref().unwrap_or("edit"), &dirs.profiles)?;
         let t = crate::permissions::translate(&def.cli, &profile, &role)?;
         apply_files(&ctx.paths, &t)?;
         t

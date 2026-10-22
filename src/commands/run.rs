@@ -19,10 +19,12 @@ pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
         "none" | "worktree" => {}
         other => bail!("unknown isolation `{other}` (expected none or worktree)"),
     }
-    let transport = a.transport.clone().unwrap_or_else(|| "resume".to_string());
+    let transport = match &a.transport {
+        Some(t) => t.clone(),
+        None => crate::config::user_transport()?.unwrap_or_else(|| "resume".to_string()),
+    };
     match transport.as_str() {
-        "resume" => {}
-        "herdr" => bail!("--transport herdr is not available yet (ticket 13)"),
+        "resume" | "herdr" => {}
         other => bail!("unknown transport `{other}` (expected resume or herdr)"),
     }
     if a.pairs == 0 {

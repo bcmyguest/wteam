@@ -212,11 +212,9 @@ fn orchestrator_def(ctx: &Ctx) -> Result<AgentDef> {
         Some(NodeKind::Agent { agent, .. }) => agent.clone(),
         _ => bail!("team `{}` has no orchestrator agent", ctx.team.name),
     };
-    let search = [
-        ctx.paths.project_agents_dir(),
-        crate::config::config_dir().join("agents"),
-    ];
-    agents::load(&name, &search)
+    let team = state::load(&ctx.paths)?.run.team;
+    let search = crate::config::search_dirs(&ctx.paths, &team);
+    agents::load(&name, &search.agents)
 }
 
 /// Save the baton as this generation's handoff file, start the next generation with a
