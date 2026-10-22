@@ -44,11 +44,19 @@ fn render_text(p: &Paths, tickets: usize, r: &PickupReport) -> String {
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let warnings = if r.warnings.is_empty() {
+        String::new()
+    } else {
+        let lines: Vec<String> = r.warnings.iter().map(|x| format!("- {x}")).collect();
+        format!("## Warnings\n\n{}\n\n", lines.join("\n"))
+    };
     format!(
-        "## Picked up\n\n{} ({tickets} tickets)\n\n## Goal\n\n{}\n\n## Work graph\n\n```mermaid\n{}```\n\n## Problems\n\n{problems}\n\nConfirm to start: `wteam run --pairs N`",
+        "## Picked up\n\n{} ({tickets} tickets)\n\n## Goal\n\n{}\n\n## Work graph\n\n```mermaid\n{}```\n\n## Width\n\nlongest_chain {} · max_parallel {}\n\n{warnings}## Problems\n\n{problems}\n\nConfirm to start: `wteam run --pairs N`",
         p.effort_dir().display(),
         r.goal,
         r.graph,
+        r.longest_chain,
+        r.max_parallel,
     )
 }
 

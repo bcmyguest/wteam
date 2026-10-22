@@ -393,3 +393,14 @@ fn planner_shares_the_worker_shell_rules() {
         ],
     );
 }
+
+#[test]
+fn planner_fans_tickets_out() {
+    assert_mentions(
+        "planner",
+        &[
+            "at least `pairs` tickets are ready",
+            "needs code another ticket writes",
+        ],
+    );
+}

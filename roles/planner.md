@@ -46,6 +46,8 @@ A re-plan gets one attempt. If the ticket blocks again, it stays blocked for a h
 - A denied command means that command, not all of Bash: split it and retry once.
 - Ticket 01 is a tracer bullet: the thinnest path through every layer, running end to end.
 - Every ticket carries a `Files:` line (the paths its work is expected to touch: a best guess for scheduling, not a fence) and a `Verify:` line (the command that proves it).
-- Draw blocking edges in `Blocked by:`; two tickets whose `Files:` overlap block each other.
+- Draw a `Blocked by:` edge only when a ticket needs code another ticket writes. Sibling modules that call each other through stable signatures need no edge: they run in parallel and integrate at review.
+- Shared `Files:` need no edge either: dispatch runs overlapping tickets one at a time.
+- Fan out after the tracer. The tracer builds the shared skeleton (package importable, shared types, registries) end to end, so that right after it lands at least `pairs` tickets are ready, when the work allows. `wteam pickup` prints `max_parallel`; a width warning means the graph is too serial.
 - Each acceptance criterion names behaviour a test observes.
 - Follow-ups in `queue.md` arrive as `[key] NN: text`. Rule of three: wait for the third sighting of one key before turning it into a ticket.

@@ -11,6 +11,9 @@ use crate::render;
 use crate::state::{self, TicketStatus};
 use crate::work::{self, Ticket};
 
+/// Fewest tickets at which a serial graph draws a width warning.
+const WIDTH_WARN_MIN_TICKETS: usize = 4;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PickupReport {
     pub slug: String,
@@ -18,8 +21,26 @@ pub struct PickupReport {
     pub imported: Vec<String>,
     /// Failed checks (empty means ready to run).
     pub problems: Vec<String>,
+    /// Advisory notes that do not block a run.
+    pub warnings: Vec<String>,
+    /// Tickets on the longest blocker chain.
+    pub longest_chain: usize,
+    /// Most tickets ready at once.
+    pub max_parallel: usize,
     /// Mermaid work graph.
     pub graph: String,
+}
+
+/// One warning when the longest chain covers more than half of a graph of 4+ tickets.
+fn width_warnings(tickets: usize, w: work::Width) -> Vec<String> {
+    if tickets < WIDTH_WARN_MIN_TICKETS || w.longest_chain * 2 <= tickets {
+        return Vec::new();
+    }
+    vec![format!(
+        "longest chain covers {} of {tickets} tickets (longest_chain {}, max_parallel {}): \
+         drop blocking edges that need no code from another ticket",
+        w.longest_chain, w.longest_chain, w.max_parallel
+    )]
 }
 
 /// Import from `from` (a `.scratch/<slug>` dir) into `paths`, or verify `paths` in place when `from` is None.
@@ -41,11 +62,15 @@ pub fn pickup(paths: &Paths, from: Option<&Path>) -> Result<PickupReport> {
         .or_else(|| tickets.first().map(|t| t.title.clone()))
         .unwrap_or_default();
 
+    let width = work::width(&tickets);
     Ok(PickupReport {
         slug: paths.slug.clone(),
         goal,
         imported,
         problems,
+        warnings: width_warnings(tickets.len(), width),
+        longest_chain: width.longest_chain,
+        max_parallel: width.max_parallel,
         graph: render::work_mermaid(&tickets, &st),
     })
 }

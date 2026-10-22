@@ -342,3 +342,62 @@ fn shell_builtins_and_chained_commands_are_checked_per_program() {
     assert_eq!(problems.len(), 1, "{problems:?}");
     assert!(problems[0].as_str().unwrap().contains("no-such-prog-abc"));
 }
+
+/// Tickets 01..=n in place, each blocked by its predecessor when `chain`, else only by 01.
+fn graph(r: &Repo, n: usize, chain: bool) {
+    for i in 1..=n {
+        let blocked = match (i, chain) {
+            (1, _) => "None (can start immediately)".to_string(),
+            (_, true) => format!("{:02}", i - 1),
+            (_, false) => "01".to_string(),
+        };
+        r.ticket(
+            &format!("{i:02}"),
+            &format!("Step {i:02}"),
+            &blocked,
+            "",
+            "",
+        );
+    }
+}
+
+#[test]
+fn eight_ticket_chain_warns_but_passes() {
+    let r = Repo::new("demo");
+    graph(&r, 8, true);
+    let v = json_pickup(&r, &[]);
+    assert_eq!(v["longest_chain"], 8);
+    assert_eq!(v["max_parallel"], 1);
+    assert_eq!(v["problems"], serde_json::json!([]));
+    let warnings = v["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    let text = warnings[0].as_str().unwrap();
+    assert!(text.contains("longest_chain 8"), "{text}");
+    assert!(text.contains("max_parallel 1"), "{text}");
+    r.wteam()
+        .arg("pickup")
+        .assert()
+        .success()
+        .stdout(contains("Warnings"))
+        .stdout(contains("longest_chain 8"));
+}
+
+#[test]
+fn tracer_with_six_fan_out_tickets_has_no_warning() {
+    let r = Repo::new("demo");
+    graph(&r, 7, false);
+    let v = json_pickup(&r, &[]);
+    assert_eq!(v["longest_chain"], 2);
+    assert_eq!(v["max_parallel"], 6);
+    assert_eq!(v["warnings"], serde_json::json!([]));
+    assert_eq!(v["problems"], serde_json::json!([]));
+}
+
+#[test]
+fn short_chains_below_four_tickets_do_not_warn() {
+    let r = Repo::new("demo");
+    graph(&r, 3, true);
+    let v = json_pickup(&r, &[]);
+    assert_eq!(v["longest_chain"], 3);
+    assert_eq!(v["warnings"], serde_json::json!([]));
+}

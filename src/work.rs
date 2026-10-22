@@ -385,6 +385,76 @@ pub fn files_cover(t: &Ticket, path: &str) -> bool {
     t.files.is_empty() || t.files.iter().any(|f| globs_overlap(f, path))
 }
 
+/// Shape of a work graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Width {
+    /// Tickets on the longest blocker chain.
+    pub longest_chain: usize,
+    /// Most tickets ready at once while tickets land one by one in id order.
+    pub max_parallel: usize,
+}
+
+/// Depth of `id` in blocker chains: its own ticket plus its deepest blocker.
+/// Unknown ids and cycles count as depth 0, so they never extend a chain.
+fn chain_depth<'a>(
+    id: &'a str,
+    by_id: &BTreeMap<&'a str, &'a Ticket>,
+    memo: &mut BTreeMap<&'a str, usize>,
+    visiting: &mut BTreeSet<&'a str>,
+) -> usize {
+    if let Some(&d) = memo.get(id) {
+        return d;
+    }
+    let Some(&t) = by_id.get(id) else { return 0 };
+    if !visiting.insert(id) {
+        return 0;
+    }
+    let deepest = t
+        .blocked_by
+        .iter()
+        .map(|b| chain_depth(b.as_str(), by_id, memo, visiting))
+        .max()
+        .unwrap_or(0);
+    visiting.remove(id);
+    memo.insert(id, deepest + 1);
+    deepest + 1
+}
+
+/// Longest blocker chain, and the most tickets ready at once when tickets land
+/// one by one (the lowest ready id first). Duplicate ids count once.
+pub fn width(tickets: &[Ticket]) -> Width {
+    let mut by_id: BTreeMap<&str, &Ticket> = BTreeMap::new();
+    for t in tickets {
+        by_id.entry(t.id.as_str()).or_insert(t);
+    }
+    let mut memo = BTreeMap::new();
+    let longest_chain = by_id
+        .keys()
+        .map(|id| chain_depth(id, &by_id, &mut memo, &mut BTreeSet::new()))
+        .max()
+        .unwrap_or(0);
+
+    let mut landed: BTreeSet<&str> = BTreeSet::new();
+    let mut max_parallel = 0;
+    loop {
+        let mut ready: Vec<&str> = by_id
+            .iter()
+            .filter(|(id, t)| {
+                !landed.contains(*id) && t.blocked_by.iter().all(|b| landed.contains(b.as_str()))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        ready.sort_by(|a, b| id_cmp(a, b));
+        max_parallel = max_parallel.max(ready.len());
+        let Some(&next) = ready.first() else { break };
+        landed.insert(next);
+    }
+    Width {
+        longest_chain,
+        max_parallel,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,6 +595,49 @@ mod tests {
     fn ready_ignores_unknown_blocker() {
         let ts = [t("01", &["09"], &[])];
         assert!(ready(&ts, &State::new("s")).is_empty());
+    }
+
+    #[test]
+    fn width_of_a_chain_is_serial() {
+        let ts = [
+            t("01", &[], &[]),
+            t("02", &["01"], &[]),
+            t("03", &["02"], &[]),
+        ];
+        assert_eq!(
+            width(&ts),
+            Width {
+                longest_chain: 3,
+                max_parallel: 1
+            }
+        );
+    }
+
+    #[test]
+    fn width_of_a_tracer_with_fan_out() {
+        let mut ts = vec![t("01", &[], &[])];
+        ts.extend((2..=7).map(|i| t(&format!("{i:02}"), &["01"], &[])));
+        assert_eq!(
+            width(&ts),
+            Width {
+                longest_chain: 2,
+                max_parallel: 6
+            }
+        );
+    }
+
+    #[test]
+    fn width_never_readies_unknown_blockers_or_cycles() {
+        let unknown = [t("01", &["09"], &[])];
+        assert_eq!(
+            width(&unknown),
+            Width {
+                longest_chain: 1,
+                max_parallel: 0
+            }
+        );
+        let cycle = [t("02", &["03"], &[]), t("03", &["02"], &[])];
+        assert_eq!(width(&cycle).max_parallel, 0);
     }
 
     #[test]
