@@ -275,7 +275,11 @@ fn submit_refuses_while_a_changed_file_has_conflict_markers() {
     r.agent_script("worker", SHARED_WORKER);
     dispatch_and_land_01(&r);
     release_02(&r);
-    let before = r.wait_for(60, |s| s["tickets"]["02"]["land_conflicts"] == 1);
+    // Wait for the landing to flip the ticket back to `doing`. The conflict counter rises first,
+    // so a snapshot taken on the counter alone can catch the ticket mid-update.
+    let before = r.wait_for(60, |s| {
+        s["tickets"]["02"]["status"] == "doing" && s["tickets"]["02"]["land_conflicts"] == 1
+    });
 
     // The resubmit omits the conflicted extra; it is still in the ticket's scope.
     r.wteam()
