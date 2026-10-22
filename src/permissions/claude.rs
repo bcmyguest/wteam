@@ -48,7 +48,7 @@ mod tests {
     use crate::permissions::{Decision, builtin};
 
     #[test]
-    fn review_profile_golden() {
+    fn control_profile_golden() {
         let t = translate(&builtin("control").unwrap(), "worker").unwrap();
         assert_eq!(
             t.args,

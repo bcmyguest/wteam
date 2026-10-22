@@ -115,6 +115,19 @@ mod tests {
     }
 
     #[test]
+    fn role_prompt_reads_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("custom.md");
+        std::fs::write(&file, "from file").unwrap();
+        // A `/` marks a path, so a same-named built-in never shadows it.
+        let path = file.to_string_lossy().to_string();
+        assert_eq!(role_prompt(&path, &[]).unwrap(), "from file");
+        // A bare `.md` name is a path relative to the cwd; a missing one errors.
+        assert!(role_prompt("missing.md", &[]).is_err());
+        assert!(role_prompt(&tmp.path().join("none.md").to_string_lossy(), &[]).is_err());
+    }
+
+    #[test]
     fn first_search_dir_wins() {
         let tmp = tempfile::tempdir().unwrap();
         let (a, b) = (tmp.path().join("a/agents"), tmp.path().join("b/agents"));

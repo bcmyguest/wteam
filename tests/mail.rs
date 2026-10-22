@@ -73,3 +73,17 @@ fn inbox_json_shape() {
     assert_eq!(v["messages"][0]["body"], "hello");
     assert!(v["messages"][0]["at"].is_u64());
 }
+
+#[test]
+fn send_json_shape() {
+    let r = Repo::new("demo");
+    let out = r
+        .wteam()
+        .env("WTEAM_AGENT", "worker.1")
+        .args(["--json", "send", "orchestrator", "hi"])
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(v["from"], "worker.1");
+    assert_eq!(v["to"], "orchestrator");
+}

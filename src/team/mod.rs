@@ -55,6 +55,7 @@ pub enum LinkKind {
     /// Instance i talks to instance i.
     Pair,
     /// Every instance talks to instance 1.
+    #[serde(rename = "fan-in")]
     FanIn,
     /// One sender reaches every instance.
     Broadcast,
@@ -64,7 +65,7 @@ impl LinkKind {
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "pair" => Self::Pair,
-            "fan-in" | "fan_in" => Self::FanIn,
+            "fan-in" => Self::FanIn,
             "broadcast" => Self::Broadcast,
             _ => return None,
         })
@@ -376,6 +377,15 @@ mod tests {
         assert_eq!(t.links[1].kind, LinkKind::FanIn);
         assert_eq!(t.links[1].label.as_deref(), Some("ok"));
         assert_eq!((t.max_visits, t.handoff_tokens), (3, 150_000));
+    }
+
+    #[test]
+    fn link_kind_serializes_as_written_in_dot() {
+        for k in [LinkKind::Pair, LinkKind::FanIn, LinkKind::Broadcast] {
+            assert_eq!(serde_json::to_value(k).unwrap(), k.name());
+            assert_eq!(LinkKind::parse(k.name()), Some(k));
+        }
+        assert_eq!(LinkKind::parse("fan_in"), None);
     }
 
     #[test]

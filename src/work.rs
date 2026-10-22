@@ -198,7 +198,13 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
     })
 }
 
-/// Load every `*.md` ticket in `dir`, sorted by id.
+/// Order ticket ids numerically: `02` < `10` < `100`.
+fn id_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (a, b) = (a.trim_start_matches('0'), b.trim_start_matches('0'));
+    a.len().cmp(&b.len()).then_with(|| a.cmp(b))
+}
+
+/// Load every `*.md` ticket in `dir`, sorted by numeric id.
 pub fn load_tickets(dir: &Path) -> Result<Vec<Ticket>> {
     let mut tickets = Vec::new();
     let rd = std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
@@ -211,7 +217,7 @@ pub fn load_tickets(dir: &Path) -> Result<Vec<Ticket>> {
             .with_context(|| format!("reading {}", path.display()))?;
         tickets.push(parse_ticket(&md, &path)?);
     }
-    tickets.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.path.cmp(&b.path)));
+    tickets.sort_by(|a, b| id_cmp(&a.id, &b.id).then_with(|| a.path.cmp(&b.path)));
     Ok(tickets)
 }
 
@@ -372,6 +378,21 @@ mod tests {
 
     fn done(state: &mut State, id: &str) {
         state.ticket_mut(id).status = TicketStatus::Done;
+    }
+
+    #[test]
+    fn ids_sort_numerically() {
+        let tmp = tempfile::tempdir().unwrap();
+        for id in ["100", "10", "2", "11"] {
+            let md = format!("# {id}: T{id}\n\n**What to build:** x.\n\n- [ ] ok\n");
+            std::fs::write(tmp.path().join(format!("{id}-t.md")), md).unwrap();
+        }
+        let ids: Vec<String> = load_tickets(tmp.path())
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(ids, ["02", "10", "11", "100"]);
     }
 
     #[test]

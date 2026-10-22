@@ -9,11 +9,16 @@ use crate::state;
 use crate::work;
 
 /// Snake-case name of a ticket status, as stored in `state.json`.
-fn status_name(s: state::TicketStatus) -> String {
-    serde_json::to_value(s)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
+fn status_name(s: state::TicketStatus) -> &'static str {
+    use state::TicketStatus::*;
+    match s {
+        Todo => "todo",
+        Doing => "doing",
+        Review => "review",
+        AwaitingApproval => "awaiting_approval",
+        Done => "done",
+        Blocked => "blocked",
+    }
 }
 
 pub fn status(g: &Global) -> Result<Out> {

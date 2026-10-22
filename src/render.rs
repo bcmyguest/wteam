@@ -1,7 +1,7 @@
 //! Mermaid rendering of the team graph and the work graph.
 
 use crate::state::{State, TicketStatus};
-use crate::team::Team;
+use crate::team::{NodeKind, Team};
 use crate::work::Ticket;
 
 const STATUSES: [(TicketStatus, &str, &str); 6] = [
@@ -17,9 +17,62 @@ const STATUSES: [(TicketStatus, &str, &str); 6] = [
     (TicketStatus::Blocked, "blocked", "fill:#fcc,stroke:#c33"),
 ];
 
+/// Collision-free Mermaid node id: alphanumerics pass through, `_` doubles, every
+/// other char becomes `_u<hex>_`. The word `end` (any case) is reserved, so it gets an
+/// `n_` prefix, which no escaped id can produce.
+fn mm_id(id: &str) -> String {
+    let mut out = String::new();
+    for c in id.chars() {
+        if c.is_alphanumeric() {
+            out.push(c);
+        } else if c == '_' {
+            out.push_str("__");
+        } else {
+            out.push_str(&format!("_u{:x}_", c as u32));
+        }
+    }
+    if out.eq_ignore_ascii_case("end") {
+        out.insert_str(0, "n_");
+    }
+    out
+}
+
+/// Quote text for a Mermaid label.
+fn mm_text(s: &str) -> String {
+    format!("\"{}\"", s.replace('"', "#quot;"))
+}
+
+/// Mermaid flowchart of a team: `[ ]` agent, `[/ /]` command, `{{ }}` human.
 pub fn team_mermaid(team: &Team) -> String {
-    let _ = team;
-    String::from("flowchart LR\n")
+    let mut out = String::from("flowchart LR\n");
+    for role in team.roles.values() {
+        let name = role.label.as_deref().unwrap_or(&role.name);
+        let id = mm_id(&role.name);
+        let line = match &role.kind {
+            NodeKind::Agent { count, .. } if *count > 1 => {
+                format!("{id}[{}]", mm_text(&format!("{name} x{count}")))
+            }
+            NodeKind::Agent { .. } => format!("{id}[{}]", mm_text(name)),
+            NodeKind::Command { .. } => format!("{id}[/{}/]", mm_text(name)),
+            NodeKind::Human => format!("{id}{{{{{}}}}}", mm_text(name)),
+        };
+        out.push_str(&format!("  {line}\n"));
+    }
+    for l in &team.links {
+        let on = l.on.map_or("any", |e| e.name());
+        let kind = l.kind.name();
+        let text = match &l.label {
+            Some(label) => format!("{label} {on}/{kind}"),
+            None => format!("{on}/{kind}"),
+        };
+        out.push_str(&format!(
+            "  {} -->|{}| {}\n",
+            mm_id(&l.from),
+            mm_text(&text),
+            mm_id(&l.to)
+        ));
+    }
+    out
 }
 
 /// `flowchart TD`: a node per ticket, an edge blocker→ticket, a class per status.
@@ -72,6 +125,34 @@ mod tests {
             path: PathBuf::new(),
             body: String::new(),
         }
+    }
+
+    #[test]
+    fn mermaid_ids_are_collision_free_and_avoid_end() {
+        assert_ne!(mm_id("a-b"), mm_id("a_b"));
+        assert_ne!(mm_id("a-b"), mm_id("a b"));
+        assert_ne!(mm_id("a_b"), mm_id("a__b"));
+        assert_ne!(mm_id("a_u2d_b"), mm_id("a-b"));
+        for reserved in ["end", "End", "END"] {
+            let id = mm_id(reserved);
+            assert!(!id.eq_ignore_ascii_case("end"), "{id}");
+        }
+        assert_ne!(mm_id("end"), mm_id("n_end"));
+        assert_eq!(mm_id("worker"), "worker");
+    }
+
+    #[test]
+    fn team_graph_renders_colliding_and_reserved_names() {
+        let src = "digraph t { a1 [label=x]; \"a-b\"; a_b; end; \"a-b\" -> a_b; a_b -> end }";
+        let team = Team::from_graph(&crate::team::dot::parse(src).unwrap(), 1).unwrap();
+        let m = team_mermaid(&team);
+        assert!(m.contains(&format!("{}[\"a-b\"]", mm_id("a-b"))), "{m}");
+        assert!(m.contains(&format!(
+            "{} -->|\"any/pair\"| {}",
+            mm_id("a_b"),
+            mm_id("end")
+        )));
+        assert!(!m.contains(" end\n") && !m.contains("  end["), "{m}");
     }
 
     #[test]

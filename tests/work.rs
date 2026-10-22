@@ -2,6 +2,7 @@
 
 mod support;
 
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 use support::Repo;
 
@@ -116,4 +117,21 @@ fn status_shows_state_agents_and_pending_events() {
     assert_eq!(v["events"][0]["text"], "fresh");
 }
 
-use predicates::prelude::PredicateBooleanExt;
+#[test]
+fn status_names_every_ticket_status() {
+    let r = repo();
+    set_state(
+        &r,
+        serde_json::json!({"slug": "demo", "tickets": {
+            "01": {"status": "awaiting_approval"}, "02": {"status": "review"},
+            "03": {"status": "blocked"}}}),
+    );
+    let v = json_of(&r, &["status"]);
+    let names: Vec<&str> = v["tickets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["awaiting_approval", "review", "blocked"]);
+}

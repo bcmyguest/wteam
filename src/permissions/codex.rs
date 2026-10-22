@@ -62,6 +62,9 @@ pub fn translate(profile: &Profile, role: &str) -> Result<Translation> {
                     }
                 }
             }
+            (_, Some(("Read", _))) if *d == Decision::Deny => Support::Unsupported(
+                "read denies are not enforced; the sandbox can read everything".into(),
+            ),
             (_, Some(("Read" | "Edit", _))) => Support::Lossy(format!("sandbox {level}")),
             (Rule::WebFetch(_), _) | (_, Some(("WebFetch", _))) => {
                 Support::Unsupported("not enforced; sandbox network setting applies".into())
@@ -160,6 +163,19 @@ prefix_rule(pattern=["rm", "-rf"], decision="forbidden")
         );
         assert!(matches!(t.support[1].support, Support::Unsupported(_)));
         assert!(matches!(t.support[2].support, Support::Unsupported(_)));
+    }
+
+    #[test]
+    fn read_deny_is_unsupported() {
+        let t = translate(&builtin("edit").unwrap(), "worker").unwrap();
+        let deny = t
+            .support
+            .iter()
+            .find(|s| s.rule == "Read(**/.env)")
+            .unwrap();
+        assert!(matches!(deny.support, Support::Unsupported(_)));
+        let allow = t.support.iter().find(|s| s.rule == "Read(**)").unwrap();
+        assert!(matches!(allow.support, Support::Lossy(_)));
     }
 
     #[test]

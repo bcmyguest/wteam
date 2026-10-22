@@ -189,7 +189,7 @@ pub struct GraphArgs {
 
 #[derive(Debug, Args)]
 pub struct PermissionsArgs {
-    /// Profiles to show (default: every role's profile in the team).
+    /// Profiles to show (default: every built-in profile).
     #[arg(long = "profile")]
     pub profiles: Vec<String>,
     /// CLIs to show (default: claude, codex, opencode, cursor).
