@@ -3,9 +3,11 @@
 # worker/reviewer pairs run them with auto dispatch.
 # Run outputs (plan, pickup, run, metrics, grade) go to <work dir>.logs, outside the repo.
 # Env: CODEGRAPH=1 gives agents a code index; OVERLAP=allow lets tickets that share files run at once;
-#   SHAPE=coupled keeps coupled classes in one ticket and adds a final integration ticket.
+#   SHAPE=coupled keeps coupled classes in one ticket and adds a final integration ticket;
+#   RUN_TIMEOUT caps the run in seconds (default 1800).
 #   sh run_wteam.sh <lib> <work dir> <planner model> <worker model> <reviewer model> <pairs>
 set -u
+command -v wteam >/dev/null || { echo "wteam not on PATH" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 LIB="$1"; DIR="$2"; PLANNER="$3"; WORKER="$4"; REVIEWER="$5"; PAIRS="$6"
 sh "$HERE/prepare.sh" "$LIB" "$DIR" wteam >/dev/null
@@ -57,7 +59,7 @@ timeout 1800 claude -p "$PLAN_PROMPT" --model "$PLANNER" --output-format json \
 plan_end=$(date +%s)
 wteam --slug bench pickup > "$LOGS/pickup.txt" 2>&1
 # 2. Run.
-timeout 7200 wteam --slug bench run --pairs "$PAIRS" --dispatch auto --timeout 1800 --max-turns 400 --replan ${OVERLAP:+--overlap "$OVERLAP"} > "$LOGS/run.txt" 2>&1
+timeout $(( ${RUN_TIMEOUT:-1800} + 600 )) wteam --slug bench run --pairs "$PAIRS" --dispatch auto --timeout "${RUN_TIMEOUT:-1800}" --max-turns 400 --replan ${OVERLAP:+--overlap "$OVERLAP"} > "$LOGS/run.txt" 2>&1
 end=$(date +%s)
 {
   echo "wall_seconds $((end - start))"
