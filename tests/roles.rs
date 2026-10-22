@@ -73,10 +73,51 @@ fn worker_names_its_commands() {
         &[
             "wteam inbox",
             "wteam submit",
-            "--summary",
+            "--summary-file",
             "wteam block",
-            "--reason",
+            "--reason-file",
         ],
+    );
+}
+
+#[test]
+fn reviewer_submits_verdict_via_file() {
+    assert_mentions(
+        "reviewer",
+        &[
+            "wteam verdict",
+            "--file scratch/verdict-",
+            "scratch/verdict-",
+        ],
+    );
+}
+
+#[test]
+fn no_prompt_submits_free_text_inline() {
+    for name in ["worker", "reviewer", "orchestrator"] {
+        let text = role(name);
+        assert!(
+            !text.contains("--summary \""),
+            "roles/{name}.md must not show `--summary \"`"
+        );
+    }
+}
+
+#[test]
+fn worker_and_reviewer_retry_denied_command_via_file_form() {
+    assert_mentions("worker", &["denied", "retry", "--summary-file"]);
+    assert_mentions(
+        "reviewer",
+        &[
+            "denied",
+            "retry",
+            "retry `wteam verdict NN pass|fail --file scratch/verdict-NN.md` once",
+        ],
+    );
+    assert_eq!(
+        role("reviewer").matches("itself is denied").count(),
+        1,
+        "roles/reviewer.md must have one denied rule, not two"
     );
 }
 
@@ -116,10 +157,11 @@ fn reviewer_names_its_commands() {
         &[
             "wteam verdict",
             "verdict <ticket> pass|fail",
-            "--finding",
-            "--note",
-            "--follow-up",
-            "key:text",
+            "--file",
+            "FINDINGS:",
+            "NOTES:",
+            "FOLLOW-UPS:",
+            "key: text",
         ],
     );
 }
@@ -299,9 +341,6 @@ fn worker_and_reviewer_advise_no_shell_file_creation() {
 
 #[test]
 fn worker_and_reviewer_keep_flag_values_on_one_line() {
-    assert_mentions(
-        "worker",
-        &["`--summary`, `--finding` and `--note` values on one line"],
-    );
-    assert_mentions("reviewer", &["`--finding` and `--note` values on one line"]);
+    assert_mentions("worker", &["`--note` values on one line"]);
+    assert_mentions("reviewer", &["each bullet in the verdict file on one line"]);
 }

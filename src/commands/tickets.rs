@@ -1,5 +1,7 @@
 //! Ticket lifecycle: dispatch, submit, verdict, block, approve.
 
+use std::path::Path;
+
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 
@@ -41,9 +43,13 @@ pub fn dispatch(g: &Global, a: &DispatchArgs) -> Result<Out> {
 }
 
 pub fn submit(g: &Global, a: &SubmitArgs) -> Result<Out> {
+    let summary = match &a.summary_file {
+        Some(p) => read_input(p, "summary")?,
+        None => a.summary.clone(),
+    };
     let ctx = Ctx::load(super::effort(g)?)?;
     let agent = super::caller(g, "human");
-    engine::submit(&ctx, &agent, &a.ticket, &a.summary, &a.extra)?;
+    engine::submit(&ctx, &agent, &a.ticket, &summary, &a.extra)?;
     Ok(Out::new(
         format!("submitted {} for review", a.ticket),
         json!({ "ticket": a.ticket, "from": agent }),
@@ -51,27 +57,30 @@ pub fn submit(g: &Global, a: &SubmitArgs) -> Result<Out> {
 }
 
 pub fn verdict(g: &Global, a: &VerdictArgs) -> Result<Out> {
+    let mut sections = match &a.file {
+        Some(p) => parse_verdict_file(&read_input(p, "verdict")?)
+            .with_context(|| format!("verdict file `{}`", p.display()))?,
+        None => VerdictSections::default(),
+    };
+    sections.findings.extend(a.findings.iter().cloned());
+    sections.notes.extend(a.notes.iter().cloned());
+    sections.follow_ups.extend(a.follow_ups.iter().cloned());
     let ctx = Ctx::load(super::effort(g)?)?;
     let agent = super::caller(g, "human");
     let kind = match a.verdict {
         VerdictValue::Pass => VerdictKind::Pass,
         VerdictValue::Fail => VerdictKind::Fail,
     };
-    let follow_ups = a
+    let follow_ups = sections
         .follow_ups
         .iter()
-        .map(|f| match f.split_once(':') {
-            Some((k, t)) if !k.trim().is_empty() => {
-                Ok((k.trim().to_string(), t.trim().to_string()))
-            }
-            _ => bail!("--follow-up must look like `key:text`, got `{f}`"),
-        })
+        .map(|f| parse_follow_up(f))
         .collect::<Result<Vec<_>>>()?;
     let v = Verdict {
         kind,
         reviewer: agent.clone(),
-        findings: a.findings.clone(),
-        notes: a.notes.clone(),
+        findings: sections.findings,
+        notes: sections.notes,
         follow_ups,
     };
     engine::verdict(&ctx, &agent, &a.ticket, v)?;
@@ -82,13 +91,75 @@ pub fn verdict(g: &Global, a: &VerdictArgs) -> Result<Out> {
 }
 
 pub fn block(g: &Global, a: &BlockArgs) -> Result<Out> {
+    let reason = match (&a.reason, &a.reason_file) {
+        (Some(r), None) => r.clone(),
+        (None, Some(p)) => read_input(p, "reason")?.trim().to_string(),
+        _ => bail!("give --reason or --reason-file"),
+    };
     let ctx = Ctx::load(super::effort(g)?)?;
     let agent = super::caller(g, "human");
-    engine::block(&ctx, &agent, &a.ticket, &a.reason)?;
+    engine::block(&ctx, &agent, &a.ticket, &reason)?;
     Ok(Out::new(
         format!("blocked {}", a.ticket),
-        json!({ "ticket": a.ticket, "reason": a.reason }),
+        json!({ "ticket": a.ticket, "reason": reason }),
     ))
+}
+
+/// Free text from a file, read as-is. Unreadable files fail before any state changes.
+fn read_input(path: &Path, what: &str) -> Result<String> {
+    std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read {what} file `{}`", path.display()))
+}
+
+/// Sections of a verdict file, before flags are merged in.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct VerdictSections {
+    pub findings: Vec<String>,
+    pub notes: Vec<String>,
+    pub follow_ups: Vec<String>,
+}
+
+/// Parse `FINDINGS:`, `NOTES:` and `FOLLOW-UPS:` sections of `- ` bullets. Blank lines are
+/// skipped; anything else outside a bullet under a known header is an error with its line number.
+pub fn parse_verdict_file(text: &str) -> Result<VerdictSections> {
+    let mut out = VerdictSections::default();
+    let mut section: Option<&str> = None;
+    for (n, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        match line {
+            "FINDINGS:" | "NOTES:" | "FOLLOW-UPS:" => section = Some(line),
+            _ => {
+                let Some(item) = line.strip_prefix("- ").map(str::trim) else {
+                    bail!(
+                        "line {}: expected a section header or a `- ` bullet, got `{line}`",
+                        n + 1
+                    );
+                };
+                if item.is_empty() {
+                    bail!("line {}: empty bullet", n + 1);
+                }
+                let list = match section {
+                    Some("FINDINGS:") => &mut out.findings,
+                    Some("NOTES:") => &mut out.notes,
+                    Some(_) => &mut out.follow_ups,
+                    None => bail!("line {}: bullet before any section header", n + 1),
+                };
+                list.push(item.to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// A follow-up is `key:text`; the key names the issue so repeats count.
+fn parse_follow_up(f: &str) -> Result<(String, String)> {
+    match f.split_once(':') {
+        Some((k, t)) if !k.trim().is_empty() => Ok((k.trim().to_string(), t.trim().to_string())),
+        _ => bail!("--follow-up must look like `key:text`, got `{f}`"),
+    }
 }
 
 /// Move a blocked ticket back to todo: reset rounds and holder, store the note.
@@ -128,4 +199,35 @@ pub fn approve(g: &Global, a: &TicketArg) -> Result<Out> {
         format!("approved {}", a.ticket),
         json!({ "ticket": a.ticket }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_all_three_sections() {
+        let text =
+            "FINDINGS:\n- a.rs: fix <-> it\n\nNOTES:\n- nit\nFOLLOW-UPS:\n- dup: shared $(x)\n";
+        let v = parse_verdict_file(text).unwrap();
+        assert_eq!(v.findings, vec!["a.rs: fix <-> it"]);
+        assert_eq!(v.notes, vec!["nit"]);
+        assert_eq!(v.follow_ups, vec!["dup: shared $(x)"]);
+    }
+
+    #[test]
+    fn rejects_stray_lines_and_bullets_without_section() {
+        assert!(parse_verdict_file("- orphan\n").is_err());
+        assert!(parse_verdict_file("FINDINGS:\nplain text\n").is_err());
+        assert!(parse_verdict_file("NOTES:\n-\n").is_err());
+    }
+
+    #[test]
+    fn follow_up_needs_a_key() {
+        assert!(parse_follow_up(": text").is_err());
+        assert_eq!(
+            parse_follow_up("k: t").unwrap(),
+            ("k".to_string(), "t".to_string())
+        );
+    }
 }

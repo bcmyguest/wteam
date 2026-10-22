@@ -58,8 +58,8 @@ wteam status                          # tickets, agents, pending events
 wteam ready                           # tickets whose blockers are done
 wteam dispatch 01 --pair 1            # hand ticket 01 to worker.1
 wteam dispatch --fill                 # hand every dispatchable ready ticket to an idle pair
-wteam submit 01 --summary "Done"      # worker: finished round to review
-wteam verdict 01 pass --note "Nit"    # reviewer: pass with a note
+wteam submit 01 --summary-file s.md  # worker: finished round to review (summary from a file)
+wteam verdict 01 pass --file v.md    # reviewer: verdict sections from a file (FINDINGS/NOTES/FOLLOW-UPS)
 ```
 
 Every command accepts `--json`. The full walkthrough is in the

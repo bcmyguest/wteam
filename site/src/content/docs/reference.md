@@ -15,9 +15,9 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `status` | Tickets, agents and pending events |
 | `ready` | Tickets whose blockers are done |
 | `dispatch <ticket>` | Assign a ticket to a worker (`--pair <n>`) |
-| `submit <ticket>` | Hand a finished round to review (`--summary <text>`) |
-| `verdict <ticket> pass\|fail` | Record a verdict (`--finding`, `--note`, `--follow-up`) |
-| `block <ticket>` | Mark a ticket blocked (`--reason <text>`) |
+| `submit <ticket>` | Hand a finished round to review (`--summary <text>` or `--summary-file <path>`) |
+| `verdict <ticket> pass\|fail` | Record a verdict (`--file <path>` with FINDINGS/NOTES/FOLLOW-UPS sections, or `--finding`, `--note`, `--follow-up`) |
+| `block <ticket>` | Mark a ticket blocked (`--reason <text>` or `--reason-file <path>`) |
 | `requeue <ticket>` | Return a blocked ticket to todo (`--note <text>`) |
 | `approve <ticket>` | Pass a human gate; the ticket resumes from the gate's pass route |
 | `send <to> <message>` | Message another agent |

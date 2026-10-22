@@ -386,7 +386,7 @@ fn brief(
         }
     }
     b.push_str(&format!(
-        "\nWhen done run `wteam submit {id} --summary \"...\"`. If you cannot proceed run `wteam block {id} --reason \"...\"`.\n",
+        "\nWhen done write the summary to a file and run `wteam submit {id} --summary-file <path>`. If you cannot proceed write the reason to a file and run `wteam block {id} --reason-file <path>`.\n",
         id = t.id
     ));
     b
@@ -664,7 +664,7 @@ fn review_request(ctx: &Ctx, t: &Ticket, from: &str, context: &str) -> Result<St
         listed.push('\n');
     }
     Ok(format!(
-        "Review request: ticket {id} from {from}\n\n{body}\n{contract}\n{context}\n{listed}Diff of the ticket's files and extras against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then run exactly one of:\n- `wteam verdict {id} pass`\n- `wteam verdict {id} fail --finding \"...\"` (repeat --finding per blocking problem)\n",
+        "Review request: ticket {id} from {from}\n\n{body}\n{contract}\n{context}\n{listed}Diff of the ticket's files and extras against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then write the verdict sections (FINDINGS, NOTES, FOLLOW-UPS) to a file and run exactly one of:\n- `wteam verdict {id} pass --file <path>`\n- `wteam verdict {id} fail --file <path>` (one `- ` bullet per blocking finding)\n",
         id = t.id,
         body = t.body.trim(),
         contract = contract_note(ctx),

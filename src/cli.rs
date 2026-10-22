@@ -122,8 +122,12 @@ pub struct DispatchArgs {
 #[derive(Debug, Args)]
 pub struct SubmitArgs {
     pub ticket: String,
-    #[arg(long, default_value = "")]
+    /// Summary on the command line; `--summary-file` is safer for free text.
+    #[arg(long, default_value = "", conflicts_with = "summary_file")]
     pub summary: String,
+    /// File holding the summary, read as-is; relative to the current directory.
+    #[arg(long = "summary-file", conflicts_with = "summary")]
+    pub summary_file: Option<PathBuf>,
     /// Changed path outside the ticket's `Files:`; repeatable. Committed on PASS.
     #[arg(long = "extra")]
     pub extra: Vec<String>,
@@ -148,13 +152,24 @@ pub struct VerdictArgs {
     /// Cross-cutting `key:text` for the planner queue; repeatable.
     #[arg(long = "follow-up")]
     pub follow_ups: Vec<String>,
+    /// File with `FINDINGS:`, `NOTES:` and `FOLLOW-UPS:` sections of `- ` bullets; merged with the flags.
+    #[arg(long = "file")]
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
 pub struct BlockArgs {
     pub ticket: String,
-    #[arg(long)]
-    pub reason: String,
+    /// Why the ticket is blocked.
+    #[arg(
+        long,
+        required_unless_present = "reason_file",
+        conflicts_with = "reason_file"
+    )]
+    pub reason: Option<String>,
+    /// File holding the reason, read as-is and trimmed; relative to the current directory.
+    #[arg(long = "reason-file", conflicts_with = "reason")]
+    pub reason_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

@@ -44,7 +44,7 @@ fn silent_worker_is_reprompted_once_then_blocked() {
     assert_eq!(s["agents"]["worker.1"]["turns"], 2);
     let mail = r.read(".wteam/demo/mail/worker.1.md");
     assert!(
-        mail.contains("You ended your turn without `wteam submit 01` or `wteam block 01`"),
+        mail.contains("You ended your turn without `wteam submit 01 --summary-file <path>` or `wteam block 01 --reason-file <path>`"),
         "{mail}"
     );
 }

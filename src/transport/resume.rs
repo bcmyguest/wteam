@@ -200,7 +200,9 @@ fn settle(s: &mut State, agent: &str, role: &str) -> Settle {
         let verb = if status == TicketStatus::Review {
             format!("`wteam verdict {id} pass|fail`")
         } else {
-            format!("`wteam submit {id}` or `wteam block {id}`")
+            format!(
+                "`wteam submit {id} --summary-file <path>` or `wteam block {id} --reason-file <path>`"
+            )
         };
         return Settle::Reprompt(format!("You ended your turn without {verb}. Do one now."));
     }

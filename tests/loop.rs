@@ -440,3 +440,187 @@ echo "session: S1"
         "{req}"
     );
 }
+
+/// Holds the agent's turn until the test writes `$WTEAM_FAKE_DIR/go`.
+const HOLD: &str = "i=0\nwhile [ ! -f \"$WTEAM_FAKE_DIR/go\" ] && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done\n";
+
+#[test]
+fn submit_summary_file_round_trips_byte_exact() {
+    let r = repo();
+    // Outer whitespace is trimmed by the engine; the inner content must survive verbatim.
+    let expected = "str<->int; a | b $(x) `tick`\n\nmiddle line  \n  indented; a|b;c\nsecond line";
+    let summary = format!("\n\n{expected}\n\n");
+    r.write("scratch/summary-01.md", &summary);
+    r.agent_script(
+        "worker",
+        "mkdir -p src\necho edit >> src/a.txt\nwteam submit 01 --summary-file scratch/summary-01.md || exit 1\necho \"session: S1\"\necho \"tokens: 1\"\n",
+    );
+    r.agent_script(
+        "reviewer",
+        "printf '%s' \"$WTEAM_PROMPT\" > \"$WTEAM_FAKE_DIR/review-request\"\nwteam verdict 01 pass\n",
+    );
+    dispatch(&r, "01");
+    events(&r);
+    let req = r.read(".wteam-fake/review-request");
+    let start = req.find("Worker summary:\n").expect("summary header") + "Worker summary:\n".len();
+    let end = start + expected.len();
+    assert_eq!(req.get(start..end), Some(expected), "{req}");
+    assert_eq!(req.as_bytes().get(end), Some(&b'\n'), "{req}");
+}
+
+#[test]
+fn submit_rejects_both_summary_flags() {
+    let r = repo();
+    r.wteam()
+        .args(["submit", "01", "--summary", "x", "--summary-file", "y.md"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn submit_missing_summary_file_leaves_state_unchanged() {
+    let r = repo();
+    r.agent_script("worker", HOLD);
+    dispatch(&r, "01");
+    r.wait_for(20, |s| {
+        s["tickets"]["01"]["status"] == "doing" && s["agents"]["worker.1"]["busy"] == true
+    });
+    r.wteam()
+        .env("WTEAM_AGENT", "worker.1")
+        .args(["submit", "01", "--summary-file", "nope.md"])
+        .assert()
+        .failure();
+    let st = r.state();
+    assert_eq!(st["tickets"]["01"]["status"], "doing");
+    assert_eq!(st["tickets"]["01"]["assignee"], "worker.1");
+    r.write(".wteam-fake/go", "");
+}
+
+#[test]
+fn block_reason_file_round_trips() {
+    let r = repo();
+    r.write("scratch/block-01.md", "needs <-> schema; $(x)\n");
+    r.agent_script(
+        "worker",
+        "wteam block 01 --reason-file scratch/block-01.md || exit 1\n",
+    );
+    dispatch(&r, "01");
+    let st = r.wait_for(20, |s| s["tickets"]["01"]["status"] == "blocked");
+    assert_eq!(
+        st["tickets"]["01"]["blocked_reason"],
+        "needs <-> schema; $(x)"
+    );
+}
+
+#[test]
+fn block_needs_exactly_one_reason_source() {
+    let r = repo();
+    r.wteam().args(["block", "01"]).assert().failure();
+    r.wteam()
+        .args(["block", "01", "--reason", "x", "--reason-file", "y.md"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn block_missing_reason_file_leaves_state_unchanged() {
+    let r = repo();
+    r.agent_script("worker", HOLD);
+    dispatch(&r, "01");
+    r.wait_for(20, |s| {
+        s["tickets"]["01"]["status"] == "doing" && s["agents"]["worker.1"]["busy"] == true
+    });
+    r.wteam()
+        .env("WTEAM_AGENT", "worker.1")
+        .args(["block", "01", "--reason-file", "nope.md"])
+        .assert()
+        .failure();
+    assert_eq!(r.state()["tickets"]["01"]["status"], "doing");
+    r.write(".wteam-fake/go", "");
+}
+
+#[test]
+fn verdict_file_pass_takes_notes_and_follow_ups() {
+    let r = repo();
+    r.agent_script("worker", "wteam submit 01 --summary ok || exit 1\n");
+    r.agent_script("reviewer", HOLD);
+    dispatch(&r, "01");
+    r.wait_for(20, |s| {
+        s["tickets"]["01"]["status"] == "review" && s["agents"]["reviewer.1"]["busy"] == true
+    });
+    r.write(
+        "scratch/verdict-01.md",
+        "FINDINGS:\n\nNOTES:\n- rename the helper <-> later\n\nFOLLOW-UPS:\n- dup: shared helper; see $(x)\n",
+    );
+    r.wteam()
+        .env("WTEAM_AGENT", "reviewer.1")
+        .args(["verdict", "01", "pass", "--file", "scratch/verdict-01.md"])
+        .assert()
+        .success();
+    assert_eq!(r.state()["tickets"]["01"]["status"], "done");
+    let reviews = r.read(".wteam/demo/reviews/01.md");
+    assert!(reviews.contains("rename the helper <-> later"), "{reviews}");
+    assert!(
+        r.read(".wteam/demo/queue.md")
+            .contains("shared helper; see $(x)")
+    );
+    r.write(".wteam-fake/go", "");
+}
+
+#[test]
+fn verdict_file_fail_merges_with_flags() {
+    let r = repo();
+    r.agent_script("worker", "wteam submit 01 --summary ok || exit 1\n");
+    r.agent_script("reviewer", HOLD);
+    dispatch(&r, "01");
+    r.wait_for(20, |s| {
+        s["tickets"]["01"]["status"] == "review" && s["agents"]["reviewer.1"]["busy"] == true
+    });
+    r.write(
+        "scratch/verdict-01.md",
+        "FINDINGS:\n- src/a.txt: handle <-> empty\n",
+    );
+    r.wteam()
+        .env("WTEAM_AGENT", "reviewer.1")
+        .args([
+            "verdict",
+            "01",
+            "fail",
+            "--file",
+            "scratch/verdict-01.md",
+            "--finding",
+            "from flag",
+        ])
+        .assert()
+        .success();
+    let reviews = r.read(".wteam/demo/reviews/01.md");
+    assert!(reviews.contains("handle <-> empty"), "{reviews}");
+    assert!(reviews.contains("from flag"), "{reviews}");
+    assert_eq!(r.state()["tickets"]["01"]["rounds"], 1);
+    r.write(".wteam-fake/go", "");
+}
+
+#[test]
+fn verdict_file_missing_or_findingless_fail_leaves_state_unchanged() {
+    let r = repo();
+    r.agent_script("worker", "wteam submit 01 --summary ok || exit 1\n");
+    r.agent_script("reviewer", HOLD);
+    dispatch(&r, "01");
+    r.wait_for(20, |s| {
+        s["tickets"]["01"]["status"] == "review" && s["agents"]["reviewer.1"]["busy"] == true
+    });
+    r.write("scratch/verdict-01.md", "NOTES:\n- just a note\n");
+    let verdict = |args: &[&str]| {
+        r.wteam()
+            .env("WTEAM_AGENT", "reviewer.1")
+            .args(["verdict", "01"])
+            .args(args)
+            .assert()
+    };
+    verdict(&["fail", "--file", "nope.md"]).failure();
+    verdict(&["fail", "--file", "scratch/verdict-01.md"]).failure();
+    let st = r.state();
+    assert_eq!(st["tickets"]["01"]["status"], "review");
+    assert_eq!(st["tickets"]["01"]["rounds"], 0);
+    r.write(".wteam-fake/go", "");
+}
