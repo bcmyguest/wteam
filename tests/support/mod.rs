@@ -23,7 +23,10 @@ impl Repo {
     /// A git repo with one commit and an empty effort `slug`.
     pub fn new(slug: &str) -> Repo {
         let dir = tempfile::tempdir().unwrap();
-        let r = Repo { dir, slug: slug.to_string() };
+        let r = Repo {
+            dir,
+            slug: slug.to_string(),
+        };
         r.git(&["init", "-q", "-b", "main"]);
         r.git(&["config", "user.email", "test@example.com"]);
         r.git(&["config", "user.name", "test"]);
@@ -71,7 +74,10 @@ impl Repo {
         }
         body.push_str("- [ ] it works\n");
         let slug = title.to_lowercase().replace(' ', "-");
-        self.write(&format!(".wteam/{}/tickets/{id}-{slug}.md", self.slug), &body);
+        self.write(
+            &format!(".wteam/{}/tickets/{id}-{slug}.md", self.slug),
+            &body,
+        );
     }
 
     /// Install a fake-agent script for `role`.
@@ -84,7 +90,9 @@ impl Repo {
         for role in ["planner", "orchestrator", "worker", "reviewer"] {
             self.write(
                 &format!(".wteam/agents/{role}.toml"),
-                &format!("name = \"{role}\"\ncli = \"fake\"\nprompt = \"{role}\"\nprofile = \"edit\"\n"),
+                &format!(
+                    "name = \"{role}\"\ncli = \"fake\"\nprompt = \"{role}\"\nprofile = \"edit\"\n"
+                ),
             );
         }
     }
@@ -103,25 +111,42 @@ impl Repo {
     }
 
     pub fn git(&self, args: &[&str]) -> String {
-        let out = Command::new("git").arg("-C").arg(self.path()).args(args).output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(self.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).to_string()
     }
 
     /// `state.json` as JSON.
     pub fn state(&self) -> serde_json::Value {
-        serde_json::from_str(&self.read(&format!(".wteam/{}/state.json", self.slug))).unwrap_or_default()
+        serde_json::from_str(&self.read(&format!(".wteam/{}/state.json", self.slug)))
+            .unwrap_or_default()
     }
 
     /// Poll until `pred(state)` holds or `secs` elapse.
-    pub fn wait_for(&self, secs: u64, pred: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+    pub fn wait_for(
+        &self,
+        secs: u64,
+        pred: impl Fn(&serde_json::Value) -> bool,
+    ) -> serde_json::Value {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
         loop {
             let s = self.state();
             if pred(&s) {
                 return s;
             }
-            assert!(std::time::Instant::now() < deadline, "timed out; state: {s:#}");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out; state: {s:#}"
+            );
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }

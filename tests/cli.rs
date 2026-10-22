@@ -8,7 +8,11 @@ use support::Repo;
 #[test]
 fn help_lists_core_commands() {
     let mut c = assert_cmd::Command::new(assert_cmd::cargo::cargo_bin("wteam"));
-    c.arg("--help").assert().success().stdout(contains("dispatch")).stdout(contains("verdict"));
+    c.arg("--help")
+        .assert()
+        .success()
+        .stdout(contains("dispatch"))
+        .stdout(contains("verdict"));
 }
 
 #[test]

@@ -16,7 +16,10 @@ pub struct Paths {
 
 impl Paths {
     pub fn new(root: impl Into<PathBuf>, slug: impl Into<String>) -> Self {
-        Self { root: root.into(), slug: slug.into() }
+        Self {
+            root: root.into(),
+            slug: slug.into(),
+        }
     }
     pub fn wteam_dir(&self) -> PathBuf {
         self.root.join(WTEAM_DIR)
@@ -116,8 +119,15 @@ pub fn resolve_slug(root: &Path, explicit: Option<&str>) -> Result<String> {
     slugs.sort();
     match slugs.len() {
         1 => Ok(slugs.remove(0)),
-        0 => bail!("no effort found under {}; pass --slug or run `wteam pickup`", dir.display()),
-        _ => bail!("several efforts under {} ({}); pass --slug", dir.display(), slugs.join(", ")),
+        0 => bail!(
+            "no effort found under {}; pass --slug or run `wteam pickup`",
+            dir.display()
+        ),
+        _ => bail!(
+            "several efforts under {} ({}); pass --slug",
+            dir.display(),
+            slugs.join(", ")
+        ),
     }
 }
 

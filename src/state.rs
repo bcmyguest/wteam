@@ -147,17 +147,31 @@ pub struct RunSettings {
 
 impl Default for RunSettings {
     fn default() -> Self {
-        Self { pairs: 1, isolation: "none".into(), transport: "resume".into(), team: "default".into() }
+        Self {
+            pairs: 1,
+            isolation: "none".into(),
+            transport: "resume".into(),
+            team: "default".into(),
+        }
     }
 }
 
 impl State {
     pub fn new(slug: &str) -> Self {
-        Self { slug: slug.to_string(), ..Default::default() }
+        Self {
+            slug: slug.to_string(),
+            ..Default::default()
+        }
     }
 
     /// Append an event for the orchestrator.
-    pub fn push_event(&mut self, kind: EventKind, ticket: Option<&str>, from: Option<&str>, text: impl Into<String>) {
+    pub fn push_event(
+        &mut self,
+        kind: EventKind,
+        ticket: Option<&str>,
+        from: Option<&str>,
+        text: impl Into<String>,
+    ) {
         self.next_seq += 1;
         self.events.push(Event {
             seq: self.next_seq,
@@ -170,7 +184,11 @@ impl State {
 
     /// Events not yet consumed by `wteam wait`.
     pub fn pending_events(&self) -> Vec<Event> {
-        self.events.iter().filter(|e| e.seq > self.events_consumed).cloned().collect()
+        self.events
+            .iter()
+            .filter(|e| e.seq > self.events_consumed)
+            .cloned()
+            .collect()
     }
 
     pub fn ticket_mut(&mut self, id: &str) -> &mut TicketState {
@@ -230,7 +248,10 @@ mod tests {
         .unwrap();
         let s = load(&p).unwrap();
         assert_eq!(s.tickets["01"].status, TicketStatus::Doing);
-        assert_eq!(s.pending_events().iter().map(|e| e.seq).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            s.pending_events().iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
     }
 
     #[test]

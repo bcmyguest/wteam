@@ -3,7 +3,7 @@
 use anyhow::{Result, bail};
 
 use super::Out;
-use crate::cli::{Global};
+use crate::cli::Global;
 
 pub fn status(g: &Global) -> Result<Out> {
     let _ = g;

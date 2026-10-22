@@ -70,7 +70,11 @@ pub fn for_cli(cli: &str) -> Result<Box<dyn Adapter>> {
         "codex" => Box::new(codex::Codex),
         "opencode" => Box::new(opencode::Opencode),
         "fake" => Box::new(fake::Fake),
-        "cursor" => bail!("the cursor adapter is not implemented yet (second wave); its permissions translate"),
-        other => bail!("unknown agent cli `{other}` (expected claude, codex, opencode, cursor or fake)"),
+        "cursor" => bail!(
+            "the cursor adapter is not implemented yet (second wave); its permissions translate"
+        ),
+        other => {
+            bail!("unknown agent cli `{other}` (expected claude, codex, opencode, cursor or fake)")
+        }
     })
 }

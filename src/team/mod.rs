@@ -101,7 +101,12 @@ impl Team {
     pub fn default_topology(pairs: u32) -> Team {
         let agent = |name: &str, count: u32| Role {
             name: name.into(),
-            kind: NodeKind::Agent { agent: name.into(), count, profile: None, prompt: None },
+            kind: NodeKind::Agent {
+                agent: name.into(),
+                count,
+                profile: None,
+                prompt: None,
+            },
             label: None,
         };
         let link = |from: &str, to: &str, on: TeamEvent, kind: LinkKind| Link {
@@ -112,18 +117,33 @@ impl Team {
             label: None,
         };
         let mut roles = BTreeMap::new();
-        for r in [agent("planner", 1), agent("orchestrator", 1), agent("worker", pairs), agent("reviewer", pairs)] {
+        for r in [
+            agent("planner", 1),
+            agent("orchestrator", 1),
+            agent("worker", pairs),
+            agent("reviewer", pairs),
+        ] {
             roles.insert(r.name.clone(), r);
         }
         Team {
             name: "default".into(),
             roles,
             links: vec![
-                link("orchestrator", "worker", TeamEvent::Dispatch, LinkKind::Broadcast),
+                link(
+                    "orchestrator",
+                    "worker",
+                    TeamEvent::Dispatch,
+                    LinkKind::Broadcast,
+                ),
                 link("worker", "reviewer", TeamEvent::Submit, LinkKind::Pair),
                 link("reviewer", "worker", TeamEvent::Fail, LinkKind::Pair),
                 link("reviewer", "orchestrator", TeamEvent::Pass, LinkKind::FanIn),
-                link("worker", "orchestrator", TeamEvent::Blocked, LinkKind::FanIn),
+                link(
+                    "worker",
+                    "orchestrator",
+                    TeamEvent::Blocked,
+                    LinkKind::FanIn,
+                ),
             ],
             max_visits: 3,
             handoff_tokens: 150_000,
@@ -196,7 +216,10 @@ mod tests {
 
     #[test]
     fn instance_ids_round_trip() {
-        assert_eq!(parse_instance(&instance_id("worker", 4)), ("worker".into(), 4));
+        assert_eq!(
+            parse_instance(&instance_id("worker", 4)),
+            ("worker".into(), 4)
+        );
         assert_eq!(parse_instance("orchestrator"), ("orchestrator".into(), 1));
     }
 }

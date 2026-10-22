@@ -3,7 +3,7 @@
 use anyhow::{Result, bail};
 
 use super::Out;
-use crate::cli::{Global, BlockArgs, DispatchArgs, SubmitArgs, TicketArg, VerdictArgs};
+use crate::cli::{BlockArgs, DispatchArgs, Global, SubmitArgs, TicketArg, VerdictArgs};
 
 pub fn dispatch(g: &Global, a: &DispatchArgs) -> Result<Out> {
     let _ = (g, a);

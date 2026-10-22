@@ -8,7 +8,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use crate::commands::{self, Out};
 
 #[derive(Debug, Parser)]
-#[command(name = "wteam", version, about = "Portable worker/reviewer teams for coding agents")]
+#[command(
+    name = "wteam",
+    version,
+    about = "Portable worker/reviewer teams for coding agents"
+)]
 pub struct Cli {
     #[command(flatten)]
     pub global: Global,
@@ -244,6 +248,9 @@ pub fn main() -> ExitCode {
 
 impl Out {
     pub fn new(text: impl Into<String>, json: serde_json::Value) -> Self {
-        Self { text: text.into(), json }
+        Self {
+            text: text.into(),
+            json,
+        }
     }
 }
