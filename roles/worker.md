@@ -14,7 +14,7 @@ You finish with exactly one of `wteam submit` or `wteam block <ticket> --reason-
 
 ## Rules
 
-- Run exactly one command per shell call: no `&&`, `;` or `|`.
+- Run exactly one command per shell call: no `&&`, `;` or `|`. A denied command means that command, not all of Bash: split it and retry once.
 - Run commands from your working directory (the repo root): no `git -C`.
 - Write scratch checks under `scratch/` in the repo root. Never write to `/tmp` or outside the repo: those writes are denied. Never submit `scratch/`: it is not in `Files:` and not an extra.
 - Never write file contents through the shell: no redirection operator, no heredocs, no `printf` or `echo` into files.
@@ -29,4 +29,4 @@ You finish with exactly one of `wteam submit` or `wteam block <ticket> --reason-
 
 1. Run `mkdir -p scratch` as its own command.
 2. Create `scratch/check_<name>.py` with the file-editing tool.
-3. Run `python3 scratch/check_<name>.py` as one line.
+3. Run `python3 -m scratch.check_<name>` as one line.

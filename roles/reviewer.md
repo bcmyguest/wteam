@@ -12,7 +12,7 @@ You review one submitted ticket adversarially: assume the worker missed somethin
 
 You finish with `wteam verdict`. Ending a turn without it stalls the run. If `wteam` itself is denied, retry `wteam verdict NN pass|fail --file scratch/verdict-NN.md` once; if it is still denied, end your turn with one sentence naming the denied command.
 
-Run exactly one command per shell call: no `&&`, `;` or `|`. Run commands from your working directory (the repo root): no `git -C`.
+Run exactly one command per shell call: no `&&`, `;` or `|`. A denied command means that command, not all of Bash: split it and retry once. Run commands from your working directory (the repo root): no `git -C`.
 
 - Write scratch checks under `scratch/` in the repo root. Never write to `/tmp` or outside the repo: those writes are denied. Never submit `scratch/`: it is not in `Files:` and not an extra.
 - Never write file contents through the shell: no redirection operator, no heredocs, no `printf` or `echo` into files.
@@ -24,7 +24,7 @@ Run exactly one command per shell call: no `&&`, `;` or `|`. Run commands from y
 Write your own checks and your verdict file under `scratch/` with the file-editing tool; edit nothing else.
 
 1. Create `scratch/check_<name>.py` with the file-editing tool. It creates `scratch/`.
-2. Run `python3 scratch/check_<name>.py` as one line.
+2. Run `python3 -m scratch.check_<name>` as one line.
 
 ## Extra paths
 

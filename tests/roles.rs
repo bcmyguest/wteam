@@ -326,7 +326,7 @@ fn worker_and_reviewer_create_files_with_edit_tool() {
         &[
             "1. Run `mkdir -p scratch` as its own command.",
             "2. Create `scratch/check_<name>.py` with the file-editing tool.",
-            "3. Run `python3 scratch/check_<name>.py` as one line.",
+            "3. Run `python3 -m scratch.check_<name>` as one line.",
             "Never write file contents through the shell",
             "Never run a multi-line command",
         ],
@@ -336,7 +336,7 @@ fn worker_and_reviewer_create_files_with_edit_tool() {
         "reviewer",
         &[
             "1. Create `scratch/check_<name>.py` with the file-editing tool. It creates `scratch/`.",
-            "2. Run `python3 scratch/check_<name>.py` as one line.",
+            "2. Run `python3 -m scratch.check_<name>` as one line.",
             "Never write file contents through the shell",
             "Never run a multi-line command",
         ],
@@ -408,4 +408,36 @@ fn planner_fans_tickets_out() {
             "needs code another ticket writes",
         ],
     );
+}
+
+const SPLIT_AND_RETRY: &str =
+    "A denied command means that command, not all of Bash: split it and retry once.";
+const SCOPE_RULE: &str = "A scope limit never contradicts an acceptance criterion: when a criterion needs code in other files, the criterion wins and those files go on `Files:`.";
+const SKELETON_RULE: &str = "In a codebase that only works once importable/compilable, the tracer owns everything the import or build needs (stub bodies included), so later tickets fan out from a working skeleton.";
+
+#[test]
+fn worker_and_reviewer_run_scratch_checks_as_modules() {
+    for name in ["worker", "reviewer"] {
+        assert_mentions(name, &["python3 -m scratch.check_<name>"]);
+        assert!(
+            !role(name).contains("python3 scratch/"),
+            "roles/{name}.md must not contain the `python3 scratch/` form"
+        );
+    }
+}
+
+#[test]
+fn worker_and_reviewer_carry_planner_split_and_retry_rule() {
+    assert!(
+        role("planner").contains(SPLIT_AND_RETRY),
+        "planner must carry the split-and-retry sentence"
+    );
+    for name in ["worker", "reviewer"] {
+        assert_mentions(name, &[SPLIT_AND_RETRY]);
+    }
+}
+
+#[test]
+fn planner_carries_scope_and_skeleton_rules() {
+    assert_mentions("planner", &[SCOPE_RULE, SKELETON_RULE]);
 }
