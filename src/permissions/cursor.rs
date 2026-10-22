@@ -83,6 +83,7 @@ mod tests {
       "Shell(wteam *)",
       "Shell(git diff *)",
       "Shell(git status *)",
+      "Shell(mkdir *)",
       "Shell(cargo *)",
       "Shell(npm *)",
       "Shell(pytest *)",
@@ -113,7 +114,7 @@ mod tests {
 }
 "#
         );
-        assert_eq!(t.support.len(), 28);
+        assert_eq!(t.support.len(), 29);
         let ask = t
             .support
             .iter()
@@ -128,7 +129,7 @@ mod tests {
                 .iter()
                 .filter(|s| s.support == Support::Exact)
                 .count(),
-            27
+            28
         );
     }
 

@@ -15,6 +15,15 @@ You finish with `wteam verdict`. Ending a turn without it stalls the run.
 Run exactly one command per shell call: no `&&`, `;` or `|`. Run commands from your working directory (the repo root): no `git -C`. If `wteam` itself is denied, end your turn with one sentence naming the denied command.
 
 - Write scratch checks under `scratch/` in the repo root. Never write to `/tmp` or outside the repo: those writes are denied. Never submit `scratch/`: it is not in `Files:` and not an extra.
+- Never write file contents through the shell: no redirection operator, no heredocs, no `printf` or `echo` into files.
+- Never run a multi-line command.
+- Keep `--finding` and `--note` values on one line.
+
+## Scratch checks
+
+1. Run `mkdir -p scratch` as its own command.
+2. Create `scratch/check_<name>.py` with the file-editing tool.
+3. Run `python3 scratch/check_<name>.py` as one line.
 
 ## Extra paths
 

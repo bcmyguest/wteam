@@ -191,6 +191,7 @@ pub fn builtin(name: &str) -> Option<Profile> {
                 "Bash(wteam *)",
                 "Bash(git diff *)",
                 "Bash(git status *)",
+                "Bash(mkdir *)",
                 "Bash(cargo *)",
                 "Bash(npm *)",
                 "Bash(pytest *)",
@@ -473,6 +474,7 @@ mod tests {
             );
         }
         let edit = builtin("edit").unwrap();
+        assert!(edit.allow.iter().any(|a| a == "Bash(mkdir *)"));
         assert_eq!(edit.ask, ["Bash(git push *)"]);
         assert_eq!(edit.deny, ["Read(**/.env)", "Bash(rm -rf *)"]);
         assert!(builtin("full").unwrap().bypass);

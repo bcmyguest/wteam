@@ -126,6 +126,7 @@ mod tests {
             r#"prefix_rule(pattern=["wteam"], decision="allow")
 prefix_rule(pattern=["git", "diff"], decision="allow")
 prefix_rule(pattern=["git", "status"], decision="allow")
+prefix_rule(pattern=["mkdir"], decision="allow")
 prefix_rule(pattern=["cargo"], decision="allow")
 prefix_rule(pattern=["npm"], decision="allow")
 prefix_rule(pattern=["pytest"], decision="allow")
@@ -150,7 +151,7 @@ prefix_rule(pattern=["git", "push"], decision="prompt")
 prefix_rule(pattern=["rm", "-rf"], decision="forbidden")
 "#
         );
-        assert_eq!(t.support.len(), 28);
+        assert_eq!(t.support.len(), 29);
         assert_eq!(
             t.support[0].support,
             Support::Lossy("sandbox workspace-write".into())

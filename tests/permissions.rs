@@ -139,3 +139,15 @@ fn edit_profile_shows_interpreter_rules() {
         assert!(text.contains(rule), "edit lacks {rule}: {text}");
     }
 }
+
+#[test]
+fn edit_profile_allows_mkdir() {
+    let r = Repo::new("demo");
+    let out = r
+        .wteam()
+        .args(["permissions", "--profile", "edit", "--cli", "claude"])
+        .assert()
+        .success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("Bash(mkdir *)"), "edit lacks mkdir: {text}");
+}

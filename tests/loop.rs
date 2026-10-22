@@ -415,3 +415,28 @@ fn extra_rejects_path_through_symlink() {
             "--extra `link/state.json` passes through symlink `link`",
         ));
 }
+
+#[test]
+fn multi_line_summary_reaches_review_request() {
+    let r = repo();
+    r.agent_script(
+        "worker",
+        r#"
+mkdir -p src
+echo edit >> src/a.txt
+wteam submit 01 --summary "$(printf 'edited a.txt\nsecond line\nthird line')" || exit 1
+echo "session: S1"
+"#,
+    );
+    r.agent_script(
+        "reviewer",
+        "printf '%s' \"$WTEAM_PROMPT\" > \"$WTEAM_FAKE_DIR/review-request\"\nwteam verdict 01 pass\n",
+    );
+    dispatch(&r, "01");
+    assert_eq!(events(&r)[0]["kind"], "passed");
+    let req = std::fs::read_to_string(r.fake_dir().join("review-request")).unwrap();
+    assert!(
+        req.contains("edited a.txt\nsecond line\nthird line"),
+        "{req}"
+    );
+}

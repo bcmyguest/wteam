@@ -261,3 +261,47 @@ fn orchestrator_runs_one_command_per_shell_call_and_fills_pairs() {
         ],
     );
 }
+
+#[test]
+fn worker_and_reviewer_create_files_with_edit_tool() {
+    for name in ["worker", "reviewer"] {
+        assert_mentions(
+            name,
+            &[
+                "1. Run `mkdir -p scratch` as its own command.",
+                "2. Create `scratch/check_<name>.py` with the file-editing tool.",
+                "3. Run `python3 scratch/check_<name>.py` as one line.",
+                "Never write file contents through the shell",
+                "Never run a multi-line command",
+            ],
+        );
+    }
+}
+
+#[test]
+fn worker_and_reviewer_advise_no_shell_file_creation() {
+    for name in ["worker", "reviewer"] {
+        let text = role(name);
+        for advice in ["<<", "printf '", "cat >", "echo >"] {
+            assert!(
+                !text.contains(advice),
+                "roles/{name}.md must not advise `{advice}`"
+            );
+        }
+        assert!(
+            !text
+                .lines()
+                .any(|l| l.contains("printf") && l.contains('>')),
+            "roles/{name}.md must not show `printf` with `>`"
+        );
+    }
+}
+
+#[test]
+fn worker_and_reviewer_keep_flag_values_on_one_line() {
+    assert_mentions(
+        "worker",
+        &["`--summary`, `--finding` and `--note` values on one line"],
+    );
+    assert_mentions("reviewer", &["`--finding` and `--note` values on one line"]);
+}
