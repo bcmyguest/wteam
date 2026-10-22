@@ -23,7 +23,7 @@ fn source(name: &str) -> (tempfile::TempDir, PathBuf) {
     .unwrap();
     std::fs::write(
         issues.join("02-second-thing.md"),
-        ticket("02", "Second thing", "01", "cargo test"),
+        ticket("02", "Second thing", "01", "true"),
     )
     .unwrap();
     (tmp, dir)
@@ -193,7 +193,7 @@ fn other_markdown_beside_issues_serves_as_spec() {
 #[test]
 fn verify_in_place_without_from() {
     let r = Repo::new("demo");
-    r.ticket("01", "First thing", "None", "", "cargo test");
+    r.ticket("01", "First thing", "None", "", "true");
     let v = json_pickup(&r, &[]);
     assert_eq!(v["slug"], "demo");
     assert_eq!(v["imported"], serde_json::json!([]));

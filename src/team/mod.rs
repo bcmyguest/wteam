@@ -8,6 +8,9 @@ use std::collections::BTreeMap;
 use anyhow::{Result, anyhow, bail};
 use serde::Serialize;
 
+/// Default seconds a command gate may run before it is killed.
+pub const DEFAULT_CHECK_TIMEOUT_SECS: u64 = 600;
+
 /// Events agents emit on a ticket; edges route on them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
@@ -94,8 +97,12 @@ pub enum NodeKind {
         /// Role prompt override (`@file.md` or inline).
         prompt: Option<String>,
     },
-    /// `shape=parallelogram`: a shell check; non-zero exit is a finding.
-    Command { script: String },
+    /// `shape=parallelogram`: a shell check; non-zero exit or timeout is a finding.
+    Command {
+        script: String,
+        /// Seconds before the check's process group is killed.
+        timeout: u64,
+    },
     /// `shape=hexagon`: a human approval gate.
     Human,
 }
@@ -221,6 +228,12 @@ impl Team {
                     script: get("script").ok_or_else(|| {
                         anyhow!("node {}: shape=parallelogram needs script=", node.id)
                     })?,
+                    timeout: match a.get("timeout") {
+                        None => DEFAULT_CHECK_TIMEOUT_SECS,
+                        Some(v) => v.parse().ok().filter(|n| *n > 0).ok_or_else(|| {
+                            anyhow!("node {}: timeout={v:?} is not a positive integer", node.id)
+                        })?,
+                    },
                 },
                 "hexagon" => NodeKind::Human,
                 other => bail!(
@@ -357,7 +370,8 @@ mod tests {
         assert_eq!(
             t.roles["b"].kind,
             NodeKind::Command {
-                script: "make".into()
+                script: "make".into(),
+                timeout: DEFAULT_CHECK_TIMEOUT_SECS,
             }
         );
         assert_eq!(t.roles["c"].kind, NodeKind::Human);

@@ -101,6 +101,10 @@ pub fn requeue(g: &Global, a: &RequeueArgs) -> Result<Out> {
 }
 
 pub fn approve(g: &Global, a: &TicketArg) -> Result<Out> {
-    let _ = (g, a);
-    bail!("not implemented: wteam approve")
+    let ctx = Ctx::load(super::effort(g)?)?;
+    engine::approve(&ctx, &a.ticket)?;
+    Ok(Out::new(
+        format!("approved {}", a.ticket),
+        json!({ "ticket": a.ticket }),
+    ))
 }

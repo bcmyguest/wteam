@@ -62,6 +62,9 @@ pub struct TicketState {
     pub blocked_reason: Option<String>,
     #[serde(default)]
     pub last_verdict: Option<Verdict>,
+    /// Reviewer roles that passed this round. Cleared on FAIL, failed check and dispatch.
+    #[serde(default)]
+    pub passes: Vec<String>,
     /// Orchestrator note from `wteam requeue`, shown in the next dispatch brief.
     #[serde(default)]
     pub note: Option<String>,

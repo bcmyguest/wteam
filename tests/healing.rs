@@ -7,7 +7,7 @@ use support::Repo;
 
 fn repo() -> Repo {
     let r = Repo::new("demo");
-    r.ticket("01", "Add thing", "None", "src/a.txt", "cargo test");
+    r.ticket("01", "Add thing", "None", "src/a.txt", "true");
     r.use_fake_agents();
     r
 }
@@ -209,13 +209,7 @@ fn deliver_clears_a_stale_pid_so_heal_does_not_respawn() {
 #[test]
 fn untracked_file_is_in_review_diff_and_commit() {
     let r = Repo::new("demo");
-    r.ticket(
-        "01",
-        "Add thing",
-        "None",
-        "src/a.txt, src/new.txt",
-        "cargo test",
-    );
+    r.ticket("01", "Add thing", "None", "src/a.txt, src/new.txt", "true");
     r.use_fake_agents();
     r.agent_script(
         "worker",

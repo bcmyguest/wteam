@@ -19,7 +19,7 @@ echo "tokens: 1234"
 
 fn repo() -> Repo {
     let r = Repo::new("demo");
-    r.ticket("01", "Add thing", "None", "src/a.txt", "cargo test");
+    r.ticket("01", "Add thing", "None", "src/a.txt", "true");
     r.use_fake_agents();
     r
 }
