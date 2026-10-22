@@ -59,8 +59,20 @@ pub fn approve(ctx: &Ctx, ticket: &str) -> Result<()> {
     bail!("not implemented: engine::approve")
 }
 
-/// Free-form message from one instance to another.
+/// Free-form message from one instance to another: append to the mailbox, then deliver.
 pub fn send(ctx: &Ctx, from: &str, to: &str, body: &str) -> Result<()> {
-    let _ = (ctx, from, to, body);
-    bail!("not implemented: engine::send")
+    let (role, index) = crate::team::parse_instance(to);
+    let is_agent = matches!(
+        ctx.team.roles.get(&role).map(|r| &r.kind),
+        Some(crate::team::NodeKind::Agent { .. })
+    );
+    if !is_agent || index < 1 || index > ctx.team.count(&role) {
+        bail!("no such agent `{to}` in team `{}`", ctx.team.name);
+    }
+    let to = &crate::team::instance_id(&role, index);
+    crate::mailbox::append(&ctx.paths, to, from, body)?;
+    let transport = crate::state::load(&ctx.paths)?.run.transport;
+    // TODO(ticket 06): the resume transport is unimplemented; ignore its error until then.
+    let _ = crate::transport::for_name(&transport).and_then(|t| t.deliver(ctx, to));
+    Ok(())
 }
