@@ -161,6 +161,55 @@ fn is_agent_role(ctx: &Ctx, role: &str) -> bool {
     )
 }
 
+/// Append the verdict to `reviews/NN.md` and its follow-ups to `queue.md`.
+fn record_review(ctx: &Ctx, t: &Ticket, round: u32, v: &Verdict) -> Result<()> {
+    use std::io::Write;
+    let label = match v.kind {
+        VerdictKind::Pass => "PASS",
+        VerdictKind::Fail => "FAIL",
+    };
+    let mut entry = format!("## Round {round}: {label} ({})\n", v.reviewer);
+    for (title, items) in [("Findings", &v.findings), ("Notes", &v.notes)] {
+        if !items.is_empty() {
+            entry.push_str(&format!("\n{title}:\n"));
+            items
+                .iter()
+                .for_each(|i| entry.push_str(&format!("- {i}\n")));
+        }
+    }
+    if !v.follow_ups.is_empty() {
+        entry.push_str("\nFollow-ups:\n");
+        for (k, text) in &v.follow_ups {
+            entry.push_str(&format!("- [{k}] {text}\n"));
+        }
+    }
+    entry.push('\n');
+    let dir = ctx.paths.reviews_dir();
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let file = dir.join(format!("{}.md", t.id));
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+        .and_then(|mut f| f.write_all(entry.as_bytes()))
+        .with_context(|| format!("appending to {}", file.display()))?;
+    if !v.follow_ups.is_empty() {
+        let mut queue = String::new();
+        for (k, text) in &v.follow_ups {
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            queue.push_str(&format!("- [{k}] {}: {text} (from {})\n", t.id, v.reviewer));
+        }
+        let file = ctx.paths.queue_file();
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&file)
+            .and_then(|mut f| f.write_all(queue.as_bytes()))
+            .with_context(|| format!("appending to {}", file.display()))?;
+    }
+    Ok(())
+}
+
 /// Assign `ticket` to a worker (pair `pair`, else the first idle one), brief it, start its turn.
 pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
     let t = find_ticket(ctx, ticket)?;
@@ -294,20 +343,33 @@ pub fn verdict(ctx: &Ctx, agent: &str, ticket: &str, verdict: Verdict) -> Result
             }
             crate::state::with_state(&ctx.paths, |s| held(s))?;
             let sha = commit_ticket(ctx, &t)?;
-            crate::state::with_state(&ctx.paths, |s| {
+            let (round, pair) = crate::state::with_state(&ctx.paths, |s| {
                 held(s)?;
                 let ts = s.ticket_mut(&t.id);
                 ts.status = TicketStatus::Done;
                 ts.commit = Some(sha.clone());
                 ts.last_verdict = Some(verdict.clone());
+                let out = (ts.rounds + 1, ts.pair);
                 s.push_event(
                     EventKind::Passed,
                     Some(&t.id),
                     Some(agent),
                     format!("ticket {} passed review, committed {sha}", t.id),
                 );
-                Ok(())
-            })
+                Ok(out)
+            })?;
+            record_review(ctx, &t, round, &verdict)?;
+            if !verdict.notes.is_empty() {
+                // Delivered with the worker's next brief; a finished ticket needs no turn.
+                let worker = crate::team::instance_id(&dispatch_role(ctx), pair.unwrap_or(index));
+                let mut body = format!("Reviewer notes on passed ticket {}:\n", t.id);
+                verdict
+                    .notes
+                    .iter()
+                    .for_each(|n| body.push_str(&format!("- {n}\n")));
+                crate::mailbox::append_ticket(&ctx.paths, &worker, agent, Some(&t.id), &body)?;
+            }
+            Ok(())
         }
         VerdictKind::Fail => {
             let pair = crate::state::load(&ctx.paths)?
@@ -326,15 +388,42 @@ pub fn verdict(ctx: &Ctx, agent: &str, ticket: &str, verdict: Verdict) -> Result
                         .map(|i| crate::team::instance_id(&l.to, *i))
                 })
                 .unwrap_or_else(|| crate::team::instance_id("worker", pair));
-            let rounds = crate::state::with_state(&ctx.paths, |s| {
+            let max = ctx.team.max_visits;
+            let reason = format!(
+                "review failed {max} rounds: {}",
+                verdict.findings.last().map_or("", String::as_str)
+            );
+            let (rounds, capped) = crate::state::with_state(&ctx.paths, |s| {
                 held(s)?;
                 let ts = s.ticket_mut(&t.id);
                 ts.rounds += 1;
-                ts.status = TicketStatus::Doing;
-                ts.assignee = Some(worker.clone());
                 ts.last_verdict = Some(verdict.clone());
-                Ok(ts.rounds)
+                let capped = ts.rounds >= max;
+                if capped {
+                    ts.status = TicketStatus::Blocked;
+                    ts.blocked_reason = Some(reason.clone());
+                } else {
+                    ts.status = TicketStatus::Doing;
+                    ts.assignee = Some(worker.clone());
+                }
+                let rounds = ts.rounds;
+                if capped {
+                    s.push_event(EventKind::Blocked, Some(&t.id), Some(agent), reason.clone());
+                }
+                Ok((rounds, capped))
             })?;
+            record_review(ctx, &t, rounds, &verdict)?;
+            if capped {
+                let note = format!("Ticket {} blocked: {reason}", t.id);
+                crate::mailbox::append_ticket(
+                    &ctx.paths,
+                    "orchestrator.1",
+                    agent,
+                    Some(&t.id),
+                    &note,
+                )?;
+                return Ok(());
+            }
             let mut body = format!(
                 "Review of ticket {} failed (round {rounds}). Findings:\n",
                 t.id
@@ -343,6 +432,13 @@ pub fn verdict(ctx: &Ctx, agent: &str, ticket: &str, verdict: Verdict) -> Result
                 .findings
                 .iter()
                 .for_each(|f| body.push_str(&format!("- {f}\n")));
+            if !verdict.notes.is_empty() {
+                body.push_str("\nReviewer notes:\n");
+                verdict
+                    .notes
+                    .iter()
+                    .for_each(|n| body.push_str(&format!("- {n}\n")));
+            }
             body.push_str(&format!(
                 "\nFix them, then run `wteam submit {}` again.\n",
                 t.id

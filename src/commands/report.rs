@@ -1,11 +1,14 @@
 //! `wteam report`.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use super::Out;
 use crate::cli::Global;
 
 pub fn run(g: &Global) -> Result<Out> {
-    let _ = g;
-    bail!("not implemented: wteam report")
+    let p = super::effort(g)?;
+    Ok(Out::new(
+        crate::report::stop_report(&p)?,
+        crate::report::report_data(&p)?,
+    ))
 }
