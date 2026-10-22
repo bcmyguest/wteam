@@ -52,10 +52,12 @@ fn requeue_resets_blocked_ticket_and_dispatch_brief_carries_note() {
 
     r.wteam().args(["dispatch", "01"]).assert().success();
     r.wait_for(30, |s| {
-        s["tickets"]["01"]["status"] == "doing" && s["agents"]["worker.1"]["turns"] == 2
+        // Turn 2 is the requeued brief. The silent worker is then re-prompted and blocked,
+        // so `turns` may already be past 2 when polled; the brief is what matters here.
+        s["agents"]["worker.1"]["turns"].as_u64().unwrap_or(0) >= 2
     });
     let prompts = std::fs::read_to_string(r.fake_dir().join("worker-prompts")).unwrap();
-    let second = prompts.rsplit("=====\n").nth(1).unwrap_or_default();
+    let second = prompts.split("=====\n").nth(1).unwrap_or_default();
     assert!(
         second.contains("Orchestrator note") && second.contains("schema lives in db/schema.sql"),
         "{prompts}"

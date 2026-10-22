@@ -204,12 +204,15 @@ touch "$WTEAM_FAKE_DIR/finished"
 fn verdict_rules_are_enforced() {
     let r = repo();
     r.agent_script("worker", "wteam submit 01\n");
-    r.agent_script("reviewer", "true\n");
+    // Holds its turn until the test has checked the rules, so the silent-turn
+    // re-prompt cannot race the verdicts below.
+    r.agent_script(
+        "reviewer",
+        "i=0\nwhile [ ! -f \"$WTEAM_FAKE_DIR/go\" ] && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done\n",
+    );
     dispatch(&r, "01");
     r.wait_for(20, |s| {
-        s["tickets"]["01"]["status"] == "review"
-            && s["agents"]["reviewer.1"]["busy"] == false
-            && s["agents"]["worker.1"]["busy"] == false
+        s["tickets"]["01"]["status"] == "review" && s["agents"]["worker.1"]["busy"] == false
     });
     let verdict = |agent: &str, args: &[&str]| {
         r.wteam()
@@ -225,6 +228,7 @@ fn verdict_rules_are_enforced() {
     assert_eq!(r.state()["tickets"]["01"]["status"], "review");
     verdict("reviewer.1", &["pass"]).success();
     assert_eq!(r.state()["tickets"]["01"]["status"], "done");
+    r.write(".wteam-fake/go", "");
 }
 
 #[test]

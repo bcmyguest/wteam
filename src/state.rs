@@ -86,6 +86,17 @@ pub struct AgentState {
     pub context_tokens: Option<u64>,
     #[serde(default)]
     pub turns: u32,
+    /// Sum of the per-turn context sizes (`context_tokens`) the CLI reports, over all turns.
+    /// It is not billed input or output tokens.
+    #[serde(default)]
+    pub tokens_total: u64,
+    /// When `deliver` started the current turn (unix nanos). Heal uses it to tell a turn
+    /// still spawning (no `turn_pid` yet) from one whose spawn died.
+    #[serde(default)]
+    pub turn_spawned_at: Option<u64>,
+    /// Consecutive turns that ended while still holding a ticket without submitting.
+    #[serde(default)]
+    pub silent_turns: u32,
     /// Byte offset into the agent's mailbox already delivered to it.
     #[serde(default)]
     pub mail_delivered: u64,
@@ -200,6 +211,13 @@ impl State {
     pub fn ticket_mut(&mut self, id: &str) -> &mut TicketState {
         self.tickets.entry(id.to_string()).or_default()
     }
+}
+
+/// Current time as unix nanoseconds (0 if the clock is before the epoch).
+pub fn now_nanos() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64)
 }
 
 /// Read state without locking (for display). Missing file yields a fresh state.

@@ -23,7 +23,7 @@ fn restore_files(paths: &Paths) -> Result<(Vec<String>, String)> {
 }
 
 /// SIGTERM the process group led by `pid`; a group that is already gone is fine.
-fn kill_group(pid: u32) {
+pub fn kill_group(pid: u32) {
     let _ = std::process::Command::new("kill")
         .args(["-TERM", "--", &format!("-{pid}")])
         .stderr(std::process::Stdio::null())
@@ -33,13 +33,19 @@ fn kill_group(pid: u32) {
 /// Kill the turn process group of every busy agent and mark them stopped.
 fn stop_agents(paths: &Paths) -> Result<Vec<String>> {
     let stopped = state::with_state(paths, |s| {
+        let busy: Vec<(String, Option<u32>)> = s
+            .agents
+            .iter()
+            .filter(|(_, a)| a.busy)
+            .map(|(id, a)| (id.clone(), a.turn_pid))
+            .collect();
         let mut stopped = Vec::new();
-        for (id, a) in s.agents.iter_mut().filter(|(_, a)| a.busy) {
-            if let Some(pid) = a.turn_pid.take() {
+        for (id, pid) in busy {
+            if let Some(pid) = pid {
                 kill_group(pid);
             }
-            a.busy = false;
-            stopped.push(id.clone());
+            crate::transport::resume::release(s, &id);
+            stopped.push(id);
         }
         Ok(stopped)
     })?;

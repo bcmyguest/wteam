@@ -57,8 +57,11 @@ pub fn append_ticket(
         .append(true)
         .open(&file)
         .with_context(|| format!("opening {}", file.display()))?;
-    // One write call keeps concurrent appends from interleaving.
+    // The exclusive lock keeps readers from seeing a half-written body.
+    f.lock()
+        .with_context(|| format!("locking {}", file.display()))?;
     f.write_all(msg.as_bytes())?;
+    f.unlock().ok();
     Ok(f.metadata()?.len())
 }
 
@@ -70,9 +73,12 @@ pub fn read_from(paths: &Paths, agent: &str, offset: u64) -> Result<(String, u64
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((String::new(), offset)),
         Err(e) => return Err(e).with_context(|| format!("opening {}", file.display())),
     };
+    f.lock_shared()
+        .with_context(|| format!("locking {}", file.display()))?;
     f.seek(SeekFrom::Start(offset))?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
+    f.unlock().ok();
     Ok((
         String::from_utf8_lossy(&buf).into_owned(),
         offset + buf.len() as u64,

@@ -32,7 +32,12 @@ pub fn translate(profile: &Profile, role: &str) -> Result<Translation> {
     let edit_allowed = rules
         .iter()
         .any(|(d, _, r)| *d == Decision::Allow && matches!(tool_pattern(r), Some(("Edit", _))));
-    let level = if edit_allowed {
+    // Agents must run `wteam`, which a read-only sandbox blocks.
+    let wteam_allowed = rules.iter().any(|(d, _, r)| {
+        *d == Decision::Allow
+            && tool_pattern(r).is_some_and(|(tool, p)| tool == "Bash" && p.starts_with("wteam"))
+    });
+    let level = if edit_allowed || wteam_allowed {
         "workspace-write"
     } else {
         "read-only"
@@ -94,7 +99,8 @@ pub fn translate(profile: &Profile, role: &str) -> Result<Translation> {
         ));
     }
     Ok(Translation {
-        args: vec!["-s".into(), level.into()],
+        // `-c` rather than `-s`: `codex exec resume` rejects `--sandbox`.
+        args: vec!["-c".into(), format!("sandbox_mode={}", quote(level))],
         files,
         support,
         ..Translation::default()
@@ -109,7 +115,7 @@ mod tests {
     #[test]
     fn edit_profile_golden() {
         let t = translate(&builtin("edit").unwrap(), "worker").unwrap();
-        assert_eq!(t.args, ["-s", "workspace-write"]);
+        assert_eq!(t.args, ["-c", r#"sandbox_mode="workspace-write""#]);
         assert_eq!(t.files.len(), 1);
         assert_eq!(
             t.files[0].0,
@@ -149,9 +155,20 @@ prefix_rule(pattern=["rm", "-rf"], decision="forbidden")
     }
 
     #[test]
-    fn read_only_without_edit_allow() {
+    fn review_profile_stays_writable_for_wteam() {
         let t = translate(&builtin("review").unwrap(), "reviewer").unwrap();
-        assert_eq!(t.args, ["-s", "read-only"]);
+        assert_eq!(t.args, ["-c", r#"sandbox_mode="workspace-write""#]);
+    }
+
+    #[test]
+    fn profile_without_edit_or_wteam_is_read_only() {
+        let p = Profile {
+            name: "x".into(),
+            allow: vec!["Read(**)".into()],
+            ..Profile::default()
+        };
+        let t = translate(&p, "w").unwrap();
+        assert_eq!(t.args, ["-c", r#"sandbox_mode="read-only""#]);
     }
 
     #[test]

@@ -26,12 +26,87 @@ impl Ctx {
         let state = crate::state::load(&paths)?;
         let team = crate::config::resolve_team(&paths, &state.run.team, state.run.pairs)?;
         let exe = std::env::current_exe()?;
-        Ok(Ctx { paths, team, exe })
+        let ctx = Ctx { paths, team, exe };
+        heal(&ctx)?;
+        Ok(ctx)
     }
+}
+
+/// Whether process `pid` exists (`kill -0`).
+pub fn pid_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Reset `busy` on agents whose turn is gone, log it, and start a turn for each agent that
+/// still has mail or a held ticket. Runs on every command through [`Ctx::load`].
+/// A busy agent with no pid is still spawning, unless its spawn is older than the grace period.
+pub fn heal(ctx: &Ctx) -> Result<()> {
+    let revived = crate::state::with_state(&ctx.paths, |s| {
+        let now = crate::state::now_nanos();
+        let mut dead: Vec<(String, Option<u32>)> = Vec::new();
+        for (name, a) in s.agents.iter_mut().filter(|(_, a)| a.busy) {
+            let gone = match a.turn_pid {
+                Some(pid) => (!pid_alive(pid)).then_some(Some(pid)),
+                None => a
+                    .turn_spawned_at
+                    .is_none_or(|t| now.saturating_sub(t) > SPAWN_GRACE_NANOS)
+                    .then_some(None),
+            };
+            if let Some(pid) = gone {
+                a.busy = false;
+                a.turn_pid = None;
+                a.turn_spawned_at = None;
+                dead.push((name.clone(), pid));
+            }
+        }
+        let mut revived = Vec::new();
+        for (name, pid) in dead {
+            let held = s.tickets.values().any(|t| {
+                t.assignee.as_deref() == Some(name.as_str())
+                    && matches!(t.status, TicketStatus::Doing | TicketStatus::Review)
+            });
+            let offset = s.agents.get(&name).map_or(0, |a| a.mail_delivered);
+            revived.push((name, pid, held, offset));
+        }
+        Ok(revived)
+    })?;
+    if revived.is_empty() {
+        return Ok(());
+    }
+    let transport = crate::state::load(&ctx.paths)?.run.transport;
+    let transport = crate::transport::for_name(&transport)?;
+    for (agent, pid, held, offset) in revived {
+        let log = ctx.paths.logs_dir().join(format!("{agent}-process.log"));
+        std::fs::create_dir_all(ctx.paths.logs_dir())?;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .with_context(|| format!("opening {}", log.display()))?;
+        let line = match pid {
+            Some(pid) => format!("wteam: turn process {pid} is gone; busy reset\n"),
+            None => "wteam: turn spawn never reported a pid; busy reset\n".to_string(),
+        };
+        std::io::Write::write_all(&mut f, line.as_bytes())?;
+        let (mail, _) = crate::mailbox::read_from(&ctx.paths, &agent, offset)?;
+        if held || !mail.trim().is_empty() {
+            transport.deliver(ctx, &agent)?;
+        }
+    }
+    Ok(())
 }
 
 /// Cap on diff text embedded in a review request.
 const MAX_DIFF_BYTES: usize = 100_000;
+
+/// How long a busy agent may lack a pid before its spawn counts as dead (30 s).
+const SPAWN_GRACE_NANOS: u64 = 30_000_000_000;
 
 /// Normalise `1`/`#01` to the two-digit ticket id and load its definition.
 fn find_ticket(ctx: &Ctx, id: &str) -> Result<Ticket> {
@@ -105,7 +180,11 @@ fn commit_ticket(ctx: &Ctx, t: &Ticket) -> Result<String> {
     } else {
         for f in &t.files {
             // A pattern that matches nothing (a file the worker never touched) is fine.
-            let _ = git(ctx, &["add", "-A", "--", f]);
+            if let Err(e) = git(ctx, &["add", "-A", "--", f])
+                && !format!("{e:#}").contains("did not match any")
+            {
+                return Err(e);
+            }
         }
         let mut args = vec!["diff", "--cached", "--name-only", "--"];
         args.extend(t.files.iter().map(String::as_str));
@@ -133,8 +212,18 @@ fn dispatch_role(ctx: &Ctx) -> String {
 }
 
 /// The worker brief: ticket, round, earlier findings and notes, and how to report back.
-fn brief(t: &Ticket, round: u32, last: Option<&Verdict>, note: Option<&str>) -> String {
-    let mut b = format!("Ticket {} (round {round})\n\n{}\n", t.id, t.body.trim());
+fn brief(
+    t: &Ticket,
+    round: u32,
+    last: Option<&Verdict>,
+    note: Option<&str>,
+    contract: &str,
+) -> String {
+    let mut b = format!(
+        "Ticket {} (round {round})\n\n{}\n{contract}",
+        t.id,
+        t.body.trim()
+    );
     if let Some(n) = note {
         b.push_str(&format!("\nOrchestrator note:\n{}\n", n.trim()));
     }
@@ -155,6 +244,18 @@ fn brief(t: &Ticket, round: u32, last: Option<&Verdict>, note: Option<&str>) -> 
         id = t.id
     ));
     b
+}
+
+/// Pointer to the effort's shared contract when the planner wrote `architecture.md`.
+fn contract_note(ctx: &Ctx) -> String {
+    if ctx.paths.effort_dir().join("architecture.md").exists() {
+        format!(
+            "\nShared contract: .wteam/{}/architecture.md. Follow its signatures and rules.\n",
+            ctx.paths.slug
+        )
+    } else {
+        String::new()
+    }
 }
 
 fn is_agent_role(ctx: &Ctx, role: &str) -> bool {
@@ -273,7 +374,13 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         &agent,
         "orchestrator",
         &t.id,
-        &brief(&t, round, last.as_ref(), note.as_deref()),
+        &brief(
+            &t,
+            round,
+            last.as_ref(),
+            note.as_deref(),
+            &contract_note(ctx),
+        ),
     )?;
     Ok(agent)
 }
@@ -313,9 +420,10 @@ pub fn submit(ctx: &Ctx, agent: &str, ticket: &str, summary: &str) -> Result<()>
         summary.trim()
     };
     let req = format!(
-        "Review request: ticket {id} from {agent}\n\n{body}\n\nWorker summary:\n{summary}\n\nDiff of the ticket's files against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then run exactly one of:\n- `wteam verdict {id} pass`\n- `wteam verdict {id} fail --finding \"...\"` (repeat --finding per blocking problem)\n",
+        "Review request: ticket {id} from {agent}\n\n{body}\n{contract}\nWorker summary:\n{summary}\n\nDiff of the ticket's files against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then run exactly one of:\n- `wteam verdict {id} pass`\n- `wteam verdict {id} fail --finding \"...\"` (repeat --finding per blocking problem)\n",
         id = t.id,
         body = t.body.trim(),
+        contract = contract_note(ctx),
     );
     mail_and_deliver(ctx, &reviewer, agent, &t.id, &req)
 }
@@ -401,26 +509,12 @@ pub fn verdict(ctx: &Ctx, agent: &str, ticket: &str, verdict: Verdict) -> Result
                 "review failed {max} rounds: {}",
                 verdict.findings.last().map_or("", String::as_str)
             );
-            let (rounds, capped) = crate::state::with_state(&ctx.paths, |s| {
+            // Mail before the state flip: a ticket that reads `doing` with no mail looks silent.
+            let rounds = crate::state::with_state(&ctx.paths, |s| {
                 held(s)?;
-                let ts = s.ticket_mut(&t.id);
-                ts.rounds += 1;
-                ts.last_verdict = Some(verdict.clone());
-                let capped = ts.rounds >= max;
-                if capped {
-                    ts.status = TicketStatus::Blocked;
-                    ts.blocked_reason = Some(reason.clone());
-                } else {
-                    ts.status = TicketStatus::Doing;
-                    ts.assignee = Some(worker.clone());
-                }
-                let rounds = ts.rounds;
-                if capped {
-                    s.push_event(EventKind::Blocked, Some(&t.id), Some(agent), reason.clone());
-                }
-                Ok((rounds, capped))
+                Ok(s.ticket_mut(&t.id).rounds + 1)
             })?;
-            record_review(ctx, &t, rounds, &verdict)?;
+            let capped = rounds >= max;
             if capped {
                 let note = format!("Ticket {} blocked: {reason}", t.id);
                 crate::mailbox::append_ticket(
@@ -430,28 +524,49 @@ pub fn verdict(ctx: &Ctx, agent: &str, ticket: &str, verdict: Verdict) -> Result
                     Some(&t.id),
                     &note,
                 )?;
+            } else {
+                let mut body = format!(
+                    "Review of ticket {} failed (round {rounds}). Findings:\n",
+                    t.id
+                );
+                verdict
+                    .findings
+                    .iter()
+                    .for_each(|f| body.push_str(&format!("- {f}\n")));
+                if !verdict.notes.is_empty() {
+                    body.push_str("\nReviewer notes:\n");
+                    verdict
+                        .notes
+                        .iter()
+                        .for_each(|n| body.push_str(&format!("- {n}\n")));
+                }
+                body.push_str(&format!(
+                    "\nFix them, then run `wteam submit {}` again.\n",
+                    t.id
+                ));
+                crate::mailbox::append_ticket(&ctx.paths, &worker, agent, Some(&t.id), &body)?;
+            }
+            crate::state::with_state(&ctx.paths, |s| {
+                held(s)?;
+                let ts = s.ticket_mut(&t.id);
+                ts.rounds += 1;
+                ts.last_verdict = Some(verdict.clone());
+                if capped {
+                    ts.status = TicketStatus::Blocked;
+                    ts.blocked_reason = Some(reason.clone());
+                    s.push_event(EventKind::Blocked, Some(&t.id), Some(agent), reason.clone());
+                } else {
+                    ts.status = TicketStatus::Doing;
+                    ts.assignee = Some(worker.clone());
+                }
+                Ok(())
+            })?;
+            record_review(ctx, &t, rounds, &verdict)?;
+            if capped {
                 return Ok(());
             }
-            let mut body = format!(
-                "Review of ticket {} failed (round {rounds}). Findings:\n",
-                t.id
-            );
-            verdict
-                .findings
-                .iter()
-                .for_each(|f| body.push_str(&format!("- {f}\n")));
-            if !verdict.notes.is_empty() {
-                body.push_str("\nReviewer notes:\n");
-                verdict
-                    .notes
-                    .iter()
-                    .for_each(|n| body.push_str(&format!("- {n}\n")));
-            }
-            body.push_str(&format!(
-                "\nFix them, then run `wteam submit {}` again.\n",
-                t.id
-            ));
-            mail_and_deliver(ctx, &worker, agent, &t.id, &body)
+            let transport = crate::state::load(&ctx.paths)?.run.transport;
+            crate::transport::for_name(&transport)?.deliver(ctx, &worker)
         }
     }
 }

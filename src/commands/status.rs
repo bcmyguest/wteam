@@ -23,6 +23,8 @@ fn status_name(s: state::TicketStatus) -> &'static str {
 
 pub fn status(g: &Global) -> Result<Out> {
     let p = super::effort(g)?;
+    // Loading the context heals dead turn processes before the state is read.
+    crate::engine::Ctx::load(p.clone())?;
     let tickets = work::load_tickets(&p.tickets_dir())?;
     let st = state::load(&p)?;
 
@@ -57,14 +59,22 @@ pub fn status(g: &Global) -> Result<Out> {
     }
     for (name, a) in &st.agents {
         let run = if a.busy { "busy" } else { "idle" };
-        text.push_str(&format!("  {name}  {run}  turns={}\n", a.turns));
+        text.push_str(&format!(
+            "  {name}  {run}  turns={}  tokens={}\n",
+            a.turns, a.tokens_total
+        ));
         agents.push(json!({
             "name": name,
             "role": a.role,
             "busy": a.busy,
             "turns": a.turns,
             "context_tokens": a.context_tokens,
+            "tokens_total": a.tokens_total,
         }));
+    }
+    let tokens_total: u64 = st.agents.values().map(|a| a.tokens_total).sum();
+    if !st.agents.is_empty() {
+        text.push_str(&format!("  total tokens={tokens_total}\n"));
     }
 
     let events = st.pending_events();
@@ -83,7 +93,7 @@ pub fn status(g: &Global) -> Result<Out> {
 
     Ok(Out::new(
         text.trim_end().to_string(),
-        json!({ "tickets": rows, "agents": agents, "events": events }),
+        json!({ "tickets": rows, "agents": agents, "tokens_total": tokens_total, "events": events }),
     ))
 }
 
