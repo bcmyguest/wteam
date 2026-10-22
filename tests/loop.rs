@@ -245,3 +245,173 @@ fn submit_requires_the_assignee_and_dispatch_requires_ready() {
         .assert()
         .failure();
 }
+
+/// Worker that edits its Files plus `docs/extra.txt` (declared with `--extra`) and leaves `scratch.txt`.
+const EXTRA_WORKER: &str = r#"
+mkdir -p src docs
+echo edit >> src/a.txt
+echo extra > docs/extra.txt
+echo scratch > scratch.txt
+wteam submit 01 --summary "docs/extra.txt is needed for the example" --extra docs/extra.txt || exit 1
+echo "session: S1"
+echo "tokens: 1234"
+"#;
+
+#[test]
+fn extra_paths_are_listed_for_review_and_committed_on_pass() {
+    let r = repo();
+    r.agent_script("worker", EXTRA_WORKER);
+    r.agent_script(
+        "reviewer",
+        "printf '%s' \"$WTEAM_PROMPT\" > \"$WTEAM_FAKE_DIR/review-request\"\nwteam verdict 01 pass\n",
+    );
+    dispatch(&r, "01");
+    let ev = events(&r);
+    assert_eq!(ev.len(), 1, "{ev:?}");
+    assert_eq!(ev[0]["kind"], "passed");
+
+    let req = r.read(".wteam-fake/review-request");
+    assert!(req.contains("Extra paths outside Files"), "{req}");
+    assert!(req.contains("- docs/extra.txt"), "{req}");
+
+    let files = files_of(&r, "HEAD");
+    assert!(files.contains(&"src/a.txt".to_string()), "{files:?}");
+    assert!(files.contains(&"docs/extra.txt".to_string()), "{files:?}");
+    assert!(!files.contains(&"scratch.txt".to_string()), "{files:?}");
+}
+
+#[test]
+fn extra_path_inside_another_in_progress_tickets_files_is_refused() {
+    let r = repo();
+    r.ticket("02", "Add two", "None", "src/b.txt", "");
+    r.write(
+        ".wteam/demo/state.json",
+        r#"{"slug":"demo","run":{"pairs":2,"isolation":"none","transport":"resume","team":"default"}}"#,
+    );
+    // Both workers hold their tickets (no submit) until `go` appears, so both stay in progress.
+    r.agent_script(
+        "worker",
+        "i=0; while [ ! -f \"$WTEAM_FAKE_DIR/go\" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n",
+    );
+    dispatch(&r, "01");
+    r.wteam().args(["dispatch", "02"]).assert().success();
+
+    r.wteam()
+        .env("WTEAM_AGENT", "worker.2")
+        .args(["submit", "02", "--extra", "src/a.txt"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("files of ticket 01"));
+}
+
+/// `submit` with one `--extra` value must fail before any state change, naming the value and the rule.
+fn extra_is_rejected(extra: &str, rule: &str) {
+    let r = repo();
+    r.wteam()
+        .args(["submit", "01", "--extra", extra])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(format!(
+            "--extra `{extra}` {rule}"
+        )));
+}
+
+#[test]
+fn extra_rejects_absolute_path() {
+    extra_is_rejected("/etc/passwd", "must be relative to the repo root");
+}
+
+#[test]
+fn extra_rejects_parent_component() {
+    extra_is_rejected("../x", "must not contain `..`");
+}
+
+#[test]
+fn extra_rejects_glob() {
+    extra_is_rejected("*", "must be a literal path, not a glob");
+}
+
+#[test]
+fn extra_rejects_repo_root() {
+    extra_is_rejected(".", "must name a file, not the repo root");
+}
+
+#[test]
+fn extra_rejects_empty() {
+    extra_is_rejected("", "must name a file, not the repo root");
+}
+
+#[test]
+fn extra_rejects_wteam_dir() {
+    extra_is_rejected(".wteam/demo/state.json", "must not be under .wteam/");
+}
+
+#[test]
+fn deleted_tracked_file_declared_as_extra_is_committed_as_deletion() {
+    let r = repo();
+    r.write("docs/old.txt", "old\n");
+    r.git(&["add", "-A"]);
+    r.git(&["commit", "-q", "-m", "chore: old doc"]);
+    r.agent_script(
+        "worker",
+        r#"
+mkdir -p src
+echo edit >> src/a.txt
+rm docs/old.txt
+wteam submit 01 --summary "removed docs/old.txt" --extra docs/old.txt || exit 1
+echo "session: S1"
+"#,
+    );
+    r.agent_script("reviewer", "wteam verdict 01 pass\n");
+    dispatch(&r, "01");
+    let ev = events(&r);
+    assert_eq!(ev[0]["kind"], "passed", "{ev:?}");
+
+    let status = r.git(&["show", "--format=", "--name-status", "HEAD"]);
+    assert!(status.contains("D\tdocs/old.txt"), "{status}");
+    assert!(!r.path().join("docs/old.txt").exists());
+}
+
+#[test]
+fn dispatch_clears_extras_from_the_previous_round() {
+    let r = repo();
+    r.write(
+        ".wteam/demo/state.json",
+        r#"{"slug":"demo","tickets":{"01":{"status":"blocked","extras":["docs/x.txt"],"blocked_reason":"old"}},"run":{"pairs":1,"isolation":"none","transport":"resume","team":"default"}}"#,
+    );
+    r.agent_script(
+        "worker",
+        "i=0; while [ ! -f \"$WTEAM_FAKE_DIR/go\" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n",
+    );
+    r.wteam().args(["requeue", "01"]).assert().success();
+    dispatch(&r, "01");
+    let s = r.state();
+    assert_eq!(s["tickets"]["01"]["extras"], serde_json::json!([]), "{s:#}");
+    r.write(".wteam-fake/go", "");
+}
+
+#[test]
+fn extra_rejects_top_magic_pathspec() {
+    extra_is_rejected(
+        ":(top).wteam/x",
+        "must not start with `:` (git pathspec magic)",
+    );
+}
+
+#[test]
+fn extra_rejects_root_magic_pathspec() {
+    extra_is_rejected(":/.wteam/x", "must not start with `:` (git pathspec magic)");
+}
+
+#[test]
+fn extra_rejects_path_through_symlink() {
+    let r = repo();
+    std::os::unix::fs::symlink(".wteam", r.path().join("link")).unwrap();
+    r.wteam()
+        .args(["submit", "01", "--extra", "link/state.json"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "--extra `link/state.json` passes through symlink `link`",
+        ));
+}

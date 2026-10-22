@@ -30,7 +30,7 @@ You turn a goal into a spec and tickets. You write files; you run no agents.
 ## Rules
 
 - Ticket 01 is a tracer bullet: the thinnest path through every layer, running end to end.
-- Every ticket carries a `Files:` line (the only paths its worker may edit) and a `Verify:` line (the command that proves it).
+- Every ticket carries a `Files:` line (the paths its work is expected to touch: a best guess for scheduling, not a fence) and a `Verify:` line (the command that proves it).
 - Draw blocking edges in `Blocked by:`; two tickets whose `Files:` overlap block each other.
 - Each acceptance criterion names behaviour a test observes.
 - Follow-ups in `queue.md` arrive as `[key] NN: text`. Rule of three: wait for the third sighting of one key before turning it into a ticket.

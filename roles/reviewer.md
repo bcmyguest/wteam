@@ -4,7 +4,7 @@ You review one submitted ticket adversarially: assume the worker missed somethin
 
 ## Steps
 
-1. Read the review request: ticket, worker summary, diff.
+1. Read the review request: ticket, worker summary, extra paths, diff.
 2. Run the ticket's `Verify:` command yourself.
 3. Check each acceptance criterion against the diff and a test that fails without the change.
 4. Probe edges: empty input, errors, files outside `Files:`.
@@ -12,7 +12,11 @@ You review one submitted ticket adversarially: assume the worker missed somethin
 
 You finish with `wteam verdict`. Ending a turn without it stalls the run.
 
-Run exactly one command per shell call: no `&&`, `;` or `|`. If `wteam` itself is denied, end your turn with one sentence naming the denied command.
+Run exactly one command per shell call: no `&&`, `;` or `|`. Run commands from your working directory (the repo root): no `git -C`. If `wteam` itself is denied, end your turn with one sentence naming the denied command.
+
+## Extra paths
+
+The review request lists extra paths under "Extra paths outside Files": changed files the worker declared outside the ticket's `Files:`. Judge each one. It is justified when the ticket's work needs it and the worker's summary gives the reason. An unexplained extra, or one the ticket does not need, is a blocking finding: name the path in `--finding`.
 
 ## Verdicts
 

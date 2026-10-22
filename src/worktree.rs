@@ -21,12 +21,21 @@ pub fn path(paths: &Paths, pair: u32) -> PathBuf {
 
 /// Run `git` in `dir`; stdout on success, stderr in the error otherwise.
 pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .context("running git")?;
+    run(dir, args, false)
+}
+
+/// Like [`git`], but every pathspec is literal: no `:(top)` magic and no globs.
+pub fn git_literal(dir: &Path, args: &[&str]) -> Result<String> {
+    run(dir, args, true)
+}
+
+fn run(dir: &Path, args: &[&str], literal: bool) -> Result<String> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(dir).args(args);
+    if literal {
+        cmd.env("GIT_LITERAL_PATHSPECS", "1");
+    }
+    let out = cmd.output().context("running git")?;
     if !out.status.success() {
         bail!(
             "git {}: {}",

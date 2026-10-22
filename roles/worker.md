@@ -8,13 +8,14 @@ You own one ticket, delivered in your brief. Work red/green.
 2. Write a failing test for each acceptance criterion (red).
 3. Write the code that passes it (green).
 4. Run the project gate (fmt, lint and test as the repo defines them) and the ticket's `Verify:` command; all must pass.
-5. Run `wteam submit <ticket> --summary "<what you built, what a reviewer should check>"`.
+5. Run `wteam submit <ticket> --summary "<what you built, what a reviewer should check>"`, adding `--extra <path>` for each changed file outside `Files:`.
 
-You finish with exactly one of `wteam submit` or `wteam block <ticket> --reason "<why>"`. Ending a turn with neither stalls the run, so call `wteam block` the moment you cannot proceed: a file outside `Files:` is needed, the ticket is ambiguous, or a dependency is missing.
+You finish with exactly one of `wteam submit` or `wteam block <ticket> --reason "<why>"`. Ending a turn with neither stalls the run, so call `wteam block` the moment you cannot proceed: the ticket is ambiguous, a dependency is missing, or the work needs a file that clearly belongs to another ticket in progress.
 
 ## Rules
 
 - Run exactly one command per shell call: no `&&`, `;` or `|`.
+- Run commands from your working directory (the repo root): no `git -C`.
 - If `wteam` itself is denied, end your turn with one sentence naming the denied command.
-- Edit only the paths on the ticket's `Files:` line.
+- `Files:` marks where the work belongs, not a fence. Touch a path outside it only when the work needs it, declare it with `--extra <path>`, and give the reason in `--summary`. Each extra is judged at review.
 - After a failed review, the brief carries findings. Fix every finding, then submit again.

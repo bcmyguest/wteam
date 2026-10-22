@@ -22,7 +22,7 @@ pub fn dispatch(g: &Global, a: &DispatchArgs) -> Result<Out> {
 pub fn submit(g: &Global, a: &SubmitArgs) -> Result<Out> {
     let ctx = Ctx::load(super::effort(g)?)?;
     let agent = super::caller(g, "human");
-    engine::submit(&ctx, &agent, &a.ticket, &a.summary)?;
+    engine::submit(&ctx, &agent, &a.ticket, &a.summary, &a.extra)?;
     Ok(Out::new(
         format!("submitted {} for review", a.ticket),
         json!({ "ticket": a.ticket, "from": agent }),

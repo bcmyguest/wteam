@@ -216,3 +216,20 @@ fn skill_names_each_step_command() {
         assert!(md.contains(n), "SKILL.md must mention `{n}`");
     }
 }
+
+#[test]
+fn worker_declares_extras_with_flag() {
+    assert_mentions("worker", &["--extra", "outside `Files:`"]);
+}
+
+#[test]
+fn reviewer_judges_extras() {
+    assert_mentions("reviewer", &["Extra paths", "unexplained"]);
+}
+
+#[test]
+fn worker_and_reviewer_run_from_repo_root() {
+    for name in ["worker", "reviewer"] {
+        assert_mentions(name, &["no `git -C`"]);
+    }
+}

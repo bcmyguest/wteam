@@ -2,7 +2,7 @@
 //! here, never through a model. The orchestrator model only decomposes,
 //! dispatches and decides what to do about blocked tickets.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
@@ -148,23 +148,54 @@ fn mail_and_deliver(ctx: &Ctx, to: &str, from: &str, ticket: &str, body: &str) -
     crate::transport::for_name(&transport)?.deliver(ctx, to)
 }
 
-/// `git diff` of the ticket's files against HEAD, new files included.
-fn ticket_diff(dir: &Path, t: &Ticket) -> Result<String> {
-    let mut specs: Vec<&str> = vec!["--"];
-    specs.extend(t.files.iter().map(String::as_str));
-    let mut args = vec!["diff", "HEAD"];
-    args.extend(&specs);
-    let mut diff = worktree::git(dir, &args)?;
-    let mut args = vec!["ls-files", "--others", "--exclude-standard"];
-    args.extend(&specs);
-    for f in worktree::git(dir, &args)?.lines() {
-        let out = std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(["diff", "--no-index", "--", "/dev/null", f])
-            .output()
-            .context("running git diff --no-index")?;
-        diff.push_str(&String::from_utf8_lossy(&out.stdout));
+/// Pathspec groups a ticket's diff and commit cover. `Files:` are the planner's globs
+/// (`src/b/**` is documented), so that group stays glob. Extras are worker-declared, so they
+/// form a literal group. A ticket without `Files:` covers everything and has no extras group.
+fn path_groups<'a>(t: &'a Ticket, extras: &'a [String]) -> Vec<(bool, Vec<&'a str>)> {
+    let files: Vec<&str> = t.files.iter().map(String::as_str).collect();
+    let mut groups = vec![(false, files)];
+    if !t.files.is_empty() && !extras.is_empty() {
+        groups.push((true, extras.iter().map(String::as_str).collect()));
+    }
+    groups
+}
+
+/// Append `-- <specs>` when there are specs; an empty list means the whole repo.
+fn push_specs<'a>(args: &mut Vec<&'a str>, specs: &[&'a str]) {
+    if !specs.is_empty() {
+        args.push("--");
+        args.extend(specs);
+    }
+}
+
+/// Run git in `dir`, literal pathspecs when `literal` is set.
+fn run_git(dir: &Path, literal: bool, args: &[&str]) -> Result<String> {
+    if literal {
+        worktree::git_literal(dir, args)
+    } else {
+        worktree::git(dir, args)
+    }
+}
+
+/// `git diff HEAD` for the ticket's files and extras, new files included.
+fn ticket_diff(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
+    let mut diff = String::new();
+    for (literal, specs) in path_groups(t, extras) {
+        let mut args = vec!["diff", "HEAD"];
+        push_specs(&mut args, &specs);
+        diff.push_str(&run_git(dir, literal, &args)?);
+        let mut args = vec!["ls-files", "--others", "--exclude-standard"];
+        push_specs(&mut args, &specs);
+        for f in run_git(dir, literal, &args)?.lines() {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .env("GIT_LITERAL_PATHSPECS", "1")
+                .args(["diff", "--no-index", "--", "/dev/null", f])
+                .output()
+                .context("running git diff --no-index")?;
+            diff.push_str(&String::from_utf8_lossy(&out.stdout));
+        }
     }
     if diff.len() > MAX_DIFF_BYTES {
         let mut cut = MAX_DIFF_BYTES;
@@ -177,33 +208,36 @@ fn ticket_diff(dir: &Path, t: &Ticket) -> Result<String> {
     Ok(diff)
 }
 
-/// Stage the ticket's files and commit only them. Returns the new sha.
-fn commit_ticket(dir: &Path, t: &Ticket) -> Result<String> {
+/// Stage the ticket's files and extras and commit only them. Returns the new sha.
+fn commit_ticket(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
     let msg = format!("feat: {} (wteam {})", t.title, t.id);
     if t.files.is_empty() {
         worktree::git(dir, &["add", "-A"])?;
         worktree::git(dir, &["commit", "--allow-empty", "-m", &msg])?;
     } else {
-        for f in &t.files {
-            // A pattern that matches nothing (a file the worker never touched) is fine.
-            if let Err(e) = worktree::git(dir, &["add", "-A", "--", f])
-                && !format!("{e:#}").contains("did not match any")
-            {
-                return Err(e);
+        let mut paths: Vec<String> = Vec::new();
+        for (literal, specs) in path_groups(t, extras) {
+            for f in specs.iter().copied() {
+                // A pattern that matches nothing (a file the worker never touched) is fine.
+                if let Err(e) = run_git(dir, literal, &["add", "-A", "--", f])
+                    && !format!("{e:#}").contains("did not match any")
+                {
+                    return Err(e);
+                }
             }
+            let mut args = vec!["diff", "--cached", "--name-only"];
+            push_specs(&mut args, &specs);
+            paths.extend(run_git(dir, literal, &args)?.lines().map(str::to_string));
         }
-        let mut args = vec!["diff", "--cached", "--name-only", "--"];
-        args.extend(t.files.iter().map(String::as_str));
-        let staged = worktree::git(dir, &args)?;
-        let paths: Vec<&str> = staged.lines().collect();
         if paths.is_empty() {
             worktree::git(dir, &["diff", "--cached", "--quiet"])
                 .context("nothing in the ticket's files changed, and other changes are staged")?;
             worktree::git(dir, &["commit", "--allow-empty", "-m", &msg])?;
         } else {
+            // Names came from git, so commit them literally: none is magic or a glob.
             let mut args = vec!["commit", "-m", &msg, "--"];
-            args.extend(&paths);
-            worktree::git(dir, &args)?;
+            args.extend(paths.iter().map(String::as_str));
+            worktree::git_literal(dir, &args)?;
         }
     }
     Ok(worktree::git(dir, &["rev-parse", "HEAD"])?
@@ -510,16 +544,35 @@ fn ticket_dir(ctx: &Ctx, ticket: &str) -> Result<PathBuf> {
 }
 
 /// The review request mail: ticket, contract pointer, `context`, diff and verdict instructions.
-fn review_request(ctx: &Ctx, t: &Ticket, from: &str, context: &str) -> String {
+fn review_request(ctx: &Ctx, t: &Ticket, from: &str, context: &str) -> Result<String> {
+    let extras = extras_of(&crate::state::load(&ctx.paths)?, &t.id);
     let diff = ticket_dir(ctx, &t.id)
-        .and_then(|dir| ticket_diff(&dir, t))
+        .and_then(|dir| ticket_diff(&dir, t, &extras))
         .unwrap_or_else(|e| format!("(diff unavailable: {e:#})"));
-    format!(
-        "Review request: ticket {id} from {from}\n\n{body}\n{contract}\n{context}\nDiff of the ticket's files against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then run exactly one of:\n- `wteam verdict {id} pass`\n- `wteam verdict {id} fail --finding \"...\"` (repeat --finding per blocking problem)\n",
+    let mut listed = String::new();
+    if !extras.is_empty() {
+        listed.push_str(
+            "Extra paths outside Files (the worker declared these at submit; judge each one):\n",
+        );
+        extras
+            .iter()
+            .for_each(|e| listed.push_str(&format!("- {e}\n")));
+        listed.push('\n');
+    }
+    Ok(format!(
+        "Review request: ticket {id} from {from}\n\n{body}\n{contract}\n{context}\n{listed}Diff of the ticket's files and extras against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then run exactly one of:\n- `wteam verdict {id} pass`\n- `wteam verdict {id} fail --finding \"...\"` (repeat --finding per blocking problem)\n",
         id = t.id,
         body = t.body.trim(),
         contract = contract_note(ctx),
-    )
+    ))
+}
+
+/// The paths a ticket's worker declared outside `Files:` at its latest submit.
+fn extras_of(s: &State, id: &str) -> Vec<String> {
+    s.tickets
+        .get(id)
+        .map(|ts| ts.extras.clone())
+        .unwrap_or_default()
 }
 
 /// Assign `ticket` to a worker (pair `pair`, else the first idle one), brief it, start its turn.
@@ -587,6 +640,7 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         ts.pair = Some(n);
         ts.blocked_reason = None;
         ts.passes.clear();
+        ts.extras.clear();
         Ok((
             agent,
             ts.rounds + 1,
@@ -610,11 +664,92 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
     Ok(agent)
 }
 
+/// Reject an `--extra` that is not one literal file path inside the repo, so a PASS
+/// cannot commit outside it. The error names the extra and the rule it broke.
+fn check_extra_path(extra: &str) -> Result<()> {
+    let path = Path::new(extra);
+    let rule = if extra.is_empty() || extra == "." {
+        "must name a file, not the repo root"
+    } else if extra.starts_with(':') {
+        "must not start with `:` (git pathspec magic)"
+    } else if path.is_absolute() {
+        "must be relative to the repo root"
+    } else if path.components().any(|c| c == Component::ParentDir) {
+        "must not contain `..`"
+    } else if extra.contains(['*', '?', '[']) {
+        "must be a literal path, not a glob"
+    } else if path.components().any(|c| c.as_os_str() == ".wteam") {
+        "must not be under .wteam/"
+    } else {
+        return Ok(());
+    };
+    bail!("--extra `{extra}` {rule}")
+}
+
+/// Reject an extra whose ancestor directory is a symlink: git would stage through it, so
+/// `link -> .wteam` would commit wteam's own state. The final component is not checked.
+fn check_no_symlink(dir: &Path, extra: &str) -> Result<()> {
+    let comps: Vec<Component> = Path::new(extra).components().collect();
+    let mut prefix = PathBuf::new();
+    for c in comps.iter().take(comps.len().saturating_sub(1)) {
+        prefix.push(c);
+        if let Ok(meta) = std::fs::symlink_metadata(dir.join(&prefix))
+            && meta.file_type().is_symlink()
+        {
+            bail!(
+                "--extra `{extra}` passes through symlink `{}`",
+                prefix.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Refuse an extra that another in-progress ticket's `Files:` cover. Only under `isolation = none`,
+/// where every pair shares one checkout and such a path is a real collision.
+fn check_extras(s: &State, all: &[Ticket], t: &Ticket, extras: &[String]) -> Result<()> {
+    for (id, ts) in &s.tickets {
+        let active = matches!(
+            ts.status,
+            TicketStatus::Doing | TicketStatus::Review | TicketStatus::AwaitingApproval
+        );
+        if id == &t.id || !active {
+            continue;
+        }
+        let Some(other) = all.iter().find(|o| &o.id == id) else {
+            continue;
+        };
+        if let Some(e) = extras.iter().find(|e| work::files_cover(other, e)) {
+            bail!(
+                "ticket {}: extra `{e}` overlaps the files of ticket {id}, which is in progress",
+                t.id
+            );
+        }
+    }
+    Ok(())
+}
+
 /// A worker finished a round: run the verify and command gates, then hand the ticket to the first reviewer.
-pub fn submit(ctx: &Ctx, agent: &str, ticket: &str, summary: &str) -> Result<()> {
+pub fn submit(
+    ctx: &Ctx,
+    agent: &str,
+    ticket: &str,
+    summary: &str,
+    extras: &[String],
+) -> Result<()> {
     let t = find_ticket(ctx, ticket)?;
+    let extras: Vec<String> = extras.iter().map(|e| e.trim().to_string()).collect();
+    extras.iter().try_for_each(|e| check_extra_path(e))?;
+    let dir = ticket_dir(ctx, &t.id)?;
+    extras.iter().try_for_each(|e| check_no_symlink(&dir, e))?;
+    let all = work::load_tickets(&ctx.paths.tickets_dir())?;
     crate::state::with_state(&ctx.paths, |s| {
-        ensure_holder(s, &t.id, agent, TicketStatus::Doing)
+        ensure_holder(s, &t.id, agent, TicketStatus::Doing)?;
+        if s.run.isolation != "worktree" {
+            check_extras(s, &all, &t, &extras)?;
+        }
+        s.ticket_mut(&t.id).extras = extras.clone();
+        Ok(())
     })?;
     let dir = ticket_dir(ctx, &t.id)?;
     for cmd in &t.verify {
@@ -655,7 +790,8 @@ pub fn submit(ctx: &Ctx, agent: &str, ticket: &str, summary: &str) -> Result<()>
                     ts.assignee = Some(reviewer.clone());
                     Ok(())
                 })?;
-                let body = review_request(ctx, &t, agent, &format!("Worker summary:\n{summary}\n"));
+                let body =
+                    review_request(ctx, &t, agent, &format!("Worker summary:\n{summary}\n"))?;
                 return mail_and_deliver(ctx, &reviewer, agent, &t.id, &body);
             }
             Some(NodeKind::Command { script, timeout }) => {
@@ -724,7 +860,7 @@ fn advance_passed(
                     .iter()
                     .for_each(|n| context.push_str(&format!("- {n}\n")));
             }
-            let body = review_request(ctx, t, by, &context);
+            let body = review_request(ctx, t, by, &context)?;
             mail_and_deliver(ctx, &reviewer, by, &t.id, &body)
         }
         Hop::Human { role } => crate::state::with_state(&ctx.paths, |s| {
@@ -750,7 +886,7 @@ fn advance_passed(
 fn land(ctx: &Ctx, t: &Ticket) -> Result<String> {
     let st = crate::state::load(&ctx.paths)?;
     let dir = ticket_dir(ctx, &t.id)?;
-    let sha = commit_ticket(&dir, t)?;
+    let sha = commit_ticket(&dir, t, &extras_of(&st, &t.id))?;
     if st.run.isolation != "worktree" {
         return Ok(sha);
     }

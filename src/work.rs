@@ -379,6 +379,12 @@ pub fn files_overlap(a: &Ticket, b: &Ticket) -> bool {
         .any(|x| b.files.iter().any(|y| globs_overlap(x, y)))
 }
 
+/// True when `path` could be touched by `t`'s `files` globs. Tickets with no
+/// `files` cover every path.
+pub fn files_cover(t: &Ticket, path: &str) -> bool {
+    t.files.is_empty() || t.files.iter().any(|f| globs_overlap(f, path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

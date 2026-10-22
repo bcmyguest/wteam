@@ -119,6 +119,9 @@ pub struct SubmitArgs {
     pub ticket: String,
     #[arg(long, default_value = "")]
     pub summary: String,
+    /// Changed path outside the ticket's `Files:`; repeatable. Committed on PASS.
+    #[arg(long = "extra")]
+    pub extra: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

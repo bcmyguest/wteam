@@ -68,6 +68,10 @@ pub struct TicketState {
     /// Orchestrator note from `wteam requeue`, shown in the next dispatch brief.
     #[serde(default)]
     pub note: Option<String>,
+    /// Changed paths outside `Files:` the worker declared at submit. Committed on PASS.
+    /// Replaced by each submit, cleared on dispatch.
+    #[serde(default)]
+    pub extras: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
