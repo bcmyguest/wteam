@@ -83,6 +83,7 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
             let (text, end) = crate::mailbox::read_from(&ctx.paths, agent, st.mail_delivered)?;
             if text.trim().is_empty() {
                 st.busy = false;
+                st.turn_pid = None;
                 let stalled = s.tickets.iter().find_map(|(id, t)| {
                     (t.assignee.as_deref() == Some(agent) && t.status == TicketStatus::Doing)
                         .then(|| id.clone())
@@ -97,6 +98,7 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
                 }
                 return Ok(None);
             }
+            st.turn_pid = Some(std::process::id());
             let first = st.session_id.is_none() && st.turns == 0;
             st.mail_delivered = end;
             Ok(Some((
@@ -140,6 +142,14 @@ fn search_dirs(ctx: &Ctx) -> Vec<PathBuf> {
     ]
 }
 
+/// Write the files a translated profile needs, backing up the originals first.
+fn apply_files(paths: &crate::paths::Paths, t: &crate::permissions::Translation) -> Result<()> {
+    for (rel, contents) in &t.files {
+        crate::backup::write_tracked(paths, rel, contents)?;
+    }
+    Ok(())
+}
+
 /// Run one adapter turn for `agent`, write its log and record the outcome.
 fn one_turn(
     ctx: &Ctx,
@@ -166,7 +176,9 @@ fn one_turn(
         ];
         let profile =
             crate::permissions::load(def.profile.as_deref().unwrap_or("edit"), &profiles)?;
-        crate::permissions::translate(&def.cli, &profile, &role)?
+        let t = crate::permissions::translate(&def.cli, &profile, &role)?;
+        apply_files(&ctx.paths, &t)?;
+        t
     };
     let role_prompt = if first {
         Some(agents::role_prompt(
@@ -272,7 +284,9 @@ fn run_spec(spec: &CommandSpec) -> Result<(String, String, bool)> {
 fn fail_turn(ctx: &Ctx, agent: &str, error: &str) -> Result<()> {
     let reason = format!("{agent} turn failed: {error}");
     let held = state::with_state(&ctx.paths, |s| {
-        s.agents.entry(agent.to_string()).or_default().busy = false;
+        let st = s.agents.entry(agent.to_string()).or_default();
+        st.busy = false;
+        st.turn_pid = None;
         let held: Vec<String> = s
             .tickets
             .iter()
@@ -293,4 +307,30 @@ fn fail_turn(ctx: &Ctx, agent: &str, error: &str) -> Result<()> {
     let ticket = held.first().map(String::as_str);
     crate::mailbox::append_ticket(&ctx.paths, "orchestrator.1", agent, ticket, &reason)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::paths::Paths;
+
+    #[test]
+    fn apply_files_writes_codex_rules_and_records_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::new(tmp.path(), "s");
+        let profile = crate::permissions::builtin("edit").unwrap();
+        let t = crate::permissions::translate("codex", &profile, "worker").unwrap();
+        assert!(!t.files.is_empty());
+        apply_files(&paths, &t).unwrap();
+        for (rel, contents) in &t.files {
+            assert_eq!(
+                &std::fs::read_to_string(tmp.path().join(rel)).unwrap(),
+                contents
+            );
+        }
+        assert!(crate::backup::pending(&paths));
+        let restored = crate::backup::restore(&paths).unwrap();
+        assert_eq!(restored.len(), t.files.len());
+        assert!(!tmp.path().join(&t.files[0].0).exists());
+    }
 }

@@ -47,7 +47,23 @@ pub fn caller(g: &Global, fallback: &str) -> String {
     g.agent.clone().unwrap_or_else(|| fallback.to_string())
 }
 
+/// Warn when a previous run left tracked files applied and nothing is running.
+fn warn_stale_manifest(g: &Global, cmd: &Command) {
+    if matches!(cmd, Command::Stop | Command::Restore | Command::Init) {
+        return;
+    }
+    let Ok(paths) = effort(g) else { return };
+    if !crate::backup::pending(&paths) {
+        return;
+    }
+    let busy = crate::state::load(&paths).is_ok_and(|s| s.agents.values().any(|a| a.busy));
+    if !busy {
+        eprintln!("warning: files from an interrupted run are still applied; run `wteam restore`");
+    }
+}
+
 pub fn run(g: &Global, cmd: &Command) -> Result<Out> {
+    warn_stale_manifest(g, cmd);
     match cmd {
         Command::Init => init::run(g),
         Command::Pickup(a) => pickup::run(g, a),

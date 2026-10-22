@@ -1,16 +1,74 @@
 //! `wteam stop` and `wteam restore`.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use super::Out;
 use crate::cli::Global;
+use crate::paths::Paths;
+use crate::state;
+
+/// Restore tracked files; the text lists what came back.
+fn restore_files(paths: &Paths) -> Result<(Vec<String>, String)> {
+    let restored = crate::backup::restore(paths)?;
+    let text = if restored.is_empty() {
+        "nothing to restore".to_string()
+    } else {
+        format!(
+            "restored {} file(s):\n{}",
+            restored.len(),
+            restored.join("\n")
+        )
+    };
+    Ok((restored, text))
+}
+
+/// SIGTERM the process group led by `pid`; a group that is already gone is fine.
+fn kill_group(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-TERM", "--", &format!("-{pid}")])
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+/// Kill the turn process group of every busy agent and mark them stopped.
+fn stop_agents(paths: &Paths) -> Result<Vec<String>> {
+    let stopped = state::with_state(paths, |s| {
+        let mut stopped = Vec::new();
+        for (id, a) in s.agents.iter_mut().filter(|(_, a)| a.busy) {
+            if let Some(pid) = a.turn_pid.take() {
+                kill_group(pid);
+            }
+            a.busy = false;
+            stopped.push(id.clone());
+        }
+        Ok(stopped)
+    })?;
+    Ok(stopped)
+}
 
 pub fn stop(g: &Global) -> Result<Out> {
-    let _ = g;
-    bail!("not implemented: wteam stop")
+    let paths = super::effort(g)?;
+    let stopped = stop_agents(&paths)?;
+    let (restored, restore_text) = restore_files(&paths)?;
+    // A report failure must not undo or hide the cleanup above.
+    let report = crate::report::stop_report(&paths);
+    let mut text = format!("stopped {} agent(s)\n{restore_text}", stopped.len());
+    match &report {
+        Ok(r) => text.push_str(&format!("\n\n{r}")),
+        Err(e) => text.push_str(&format!("\n\nstop report unavailable: {e:#}")),
+    }
+    Ok(Out::new(
+        text,
+        serde_json::json!({
+            "stopped": stopped,
+            "restored": restored,
+            "report": report.ok(),
+        }),
+    ))
 }
 
 pub fn restore(g: &Global) -> Result<Out> {
-    let _ = g;
-    bail!("not implemented: wteam restore")
+    let paths = super::effort(g)?;
+    let (restored, text) = restore_files(&paths)?;
+    Ok(Out::new(text, serde_json::json!({ "restored": restored })))
 }

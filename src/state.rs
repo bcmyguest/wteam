@@ -75,6 +75,9 @@ pub struct AgentState {
     /// A turn process is running for this agent.
     #[serde(default)]
     pub busy: bool,
+    /// Pid of the running `__turn` process (also its process group id), while busy.
+    #[serde(default)]
+    pub turn_pid: Option<u32>,
     /// Context size after the last turn, when the CLI reports it.
     #[serde(default)]
     pub context_tokens: Option<u64>,
