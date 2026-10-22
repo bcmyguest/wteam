@@ -27,6 +27,7 @@ export default defineConfig({
             { label: 'Concepts', slug: 'concepts' },
             { label: 'Architecture', slug: 'architecture' },
             { label: 'Permissions', slug: 'permissions' },
+            { label: 'Benchmark', slug: 'benchmark' },
           ],
         },
         { label: 'Reference', items: [{ label: 'CLI and files', slug: 'reference' }] },

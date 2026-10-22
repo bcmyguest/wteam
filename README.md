@@ -11,6 +11,20 @@ through append-only mailboxes under `.wteam/`. Documentation site:
 
 ![wteam demo](site/public/demo.gif)
 
+## Benchmark
+
+On [Aider's polyglot benchmark](https://github.com/Aider-AI/polyglot-benchmark) (34 Python exercises, **hidden tests**):
+
+| Configuration | Passed | Wall time | Cost |
+|---|---|---|---|
+| Single session, Sonnet | 27/34 | 214 s | $0.79 |
+| Single session, Haiku | 20/34 | 400 s | $0.28 |
+| wteam, Haiku workers + Haiku reviewers | 20/34 | 334 s | $1.92 |
+| wteam, Haiku workers + Sonnet reviewers | 28/34 | 351 s | $12.23 |
+
+Small independent tasks favour a single session. A stronger reviewer lifts cheap workers, but at a cost.
+Full results, method and caveats: [benchmark page](https://bcmyguest.github.io/wteam/benchmark/) and `bench/polyglot/`.
+
 ## Install
 
 macOS and Linux (including WSL), from the latest GitHub release:

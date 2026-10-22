@@ -2,6 +2,8 @@
 # Builds a benchmark repo from Aider's polyglot benchmark (Python track):
 # one directory per exercise with the stub, its unit tests and instructions.
 #   sh prepare.sh <polyglot-benchmark checkout> <out dir> [wteam]   (BENCH_LIMIT=N: first N exercises)
+# HIDDEN=1 removes the unit tests from the repo (Aider protocol): agents see only
+# INSTRUCTIONS.md and the stub; grade.sh still runs the pristine tests afterwards.
 # With "wteam", also writes one ticket per exercise under .wteam/bench/.
 set -eu
 SRC="$1/python/exercises/practice"; OUT="$2"; MODE="${3:-}"
@@ -14,6 +16,7 @@ for d in "$SRC"/*/; do
   ex=$(basename "$d"); mod=$(echo "$ex" | tr - _)
   mkdir -p "$ex"
   cp "$d"*.py "$ex/"   # stub, tests and any helpers (e.g. paasio/test_utils.py)
+  if [ "${HIDDEN:-0}" = 1 ]; then rm -f "$ex/${mod}_test.py"; fi
   cat "$d.docs/instructions.md" > "$ex/INSTRUCTIONS.md"
   if [ -f "$d.docs/instructions.append.md" ]; then cat "$d.docs/instructions.append.md" >> "$ex/INSTRUCTIONS.md"; fi
   n=$((n+1))
@@ -25,8 +28,13 @@ if [ "$MODE" = wteam ]; then
   i=0
   for d in */; do
     ex=${d%/}; mod=$(echo "$ex" | tr - _); i=$((i+1)); id=$(printf '%02d' $i)
-    printf '# %s: Solve %s\n\n**What to build:** implement `%s/%s.py` so that `%s/%s_test.py` passes. The exercise statement is in `%s/INSTRUCTIONS.md`. Do not edit the test file.\n\n**Blocked by:** None (can start immediately)\n\n**Status:** ready-for-agent\n\n**Files:** %s/%s.py\n\n**Verify:** python3 -m pytest -q %s/%s_test.py\n\n- [ ] every test in `%s/%s_test.py` passes\n' \
-      "$id" "$ex" "$ex" "$mod" "$ex" "$mod" "$ex" "$ex" "$mod" "$ex" "$mod" "$ex" "$mod" > ".wteam/bench/tickets/$id-$ex.md"
+    if [ "${HIDDEN:-0}" = 1 ]; then
+      printf '# %s: Solve %s\n\n**What to build:** implement `%s/%s.py` exactly as `%s/INSTRUCTIONS.md` specifies, including every edge case and error it describes. A hidden test suite grades the result, so write and run your own checks.\n\n**Blocked by:** None (can start immediately)\n\n**Status:** ready-for-agent\n\n**Files:** %s/%s.py\n\n- [ ] behaviour matches every rule and example in `%s/INSTRUCTIONS.md`\n' \
+        "$id" "$ex" "$ex" "$mod" "$ex" "$ex" "$mod" "$ex" > ".wteam/bench/tickets/$id-$ex.md"
+    else
+      printf '# %s: Solve %s\n\n**What to build:** implement `%s/%s.py` so that `%s/%s_test.py` passes. The exercise statement is in `%s/INSTRUCTIONS.md`. Do not edit the test file.\n\n**Blocked by:** None (can start immediately)\n\n**Status:** ready-for-agent\n\n**Files:** %s/%s.py\n\n**Verify:** python3 -m pytest -q %s/%s_test.py\n\n- [ ] every test in `%s/%s_test.py` passes\n' \
+        "$id" "$ex" "$ex" "$mod" "$ex" "$mod" "$ex" "$ex" "$mod" "$ex" "$mod" "$ex" "$mod" > ".wteam/bench/tickets/$id-$ex.md"
+    fi
   done
   printf '# Polyglot benchmark (Python)\n\n## Problem Statement\n\nSolve every exercise: each stub must pass its unit tests.\n' > .wteam/bench/spec.md
 fi
