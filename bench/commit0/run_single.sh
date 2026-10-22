@@ -6,7 +6,7 @@ set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 LIB="$1"; DIR="$2"; MODEL="$3"
 sh "$HERE/prepare.sh" "$LIB" "$DIR" >/dev/null
-LOGS="${DIR%/}.logs"; rm -rf "$LOGS"; mkdir -p "$LOGS"
+LOGS="${DIR%/}.logs"; rm -rf "$LOGS"; mkdir -p "$LOGS"; touch "$LOGS/.start"
 cd "$DIR"
 . "$HERE/goal.sh"
 start=$(date +%s)
@@ -36,6 +36,13 @@ print("output_tokens", u.get("output_tokens"))
 PY
 sh "$HERE/grade.sh" "$LIB" "$DIR" > "$LOGS/grade.txt"
 tail -1 "$LOGS/grade.txt" >> "$LOGS/metrics.txt"
-sh "$HERE/audit.sh" "$LOGS" > "$LOGS/audit.txt"
+# Claude Code keeps the full transcript per project dir; keep this run's copy as evidence.
+T="$HOME/.claude/projects/$(printf '%s' "$DIR" | sed 's#[/.]#-#g')"
+mkdir -p "$LOGS/transcripts"
+[ -d "$T" ] && find "$T" -maxdepth 1 -name '*.jsonl' -newer "$LOGS/.start" -exec cp {} "$LOGS/transcripts/" \;
+OWN="$DIR" sh "$HERE/audit.sh" "$LOGS" > "$LOGS/audit.txt"
 head -1 "$LOGS/audit.txt" >> "$LOGS/metrics.txt"
+sh "$HERE/memorization.sh" "$LIB" "$DIR" >> "$LOGS/metrics.txt"
+mv "$LOGS/transcripts" "$DIR/.transcripts"   # transcripts hold code: archived, not left in /tmp
+sh "$HERE/archive.sh" "$DIR"
 cat "$LOGS/metrics.txt"

@@ -7,7 +7,7 @@ set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 LIB="$1"; DIR="$2"; PLANNER="$3"; WORKER="$4"; REVIEWER="$5"; PAIRS="$6"
 sh "$HERE/prepare.sh" "$LIB" "$DIR" wteam >/dev/null
-LOGS="${DIR%/}.logs"; rm -rf "$LOGS"; mkdir -p "$LOGS"
+LOGS="${DIR%/}.logs"; rm -rf "$LOGS"; mkdir -p "$LOGS"; touch "$LOGS/.start"
 cd "$DIR"
 . "$HERE/goal.sh"
 mkdir -p .wteam/agents
@@ -73,6 +73,8 @@ PY
 grep -E "^Run stopped" "$LOGS/run.txt" >> "$LOGS/metrics.txt"
 sh "$HERE/grade.sh" "$LIB" "$DIR" > "$LOGS/grade.txt"
 tail -1 "$LOGS/grade.txt" >> "$LOGS/metrics.txt"
-sh "$HERE/audit.sh" "$LOGS" "$DIR/.wteam" > "$LOGS/audit.txt"
+OWN="$DIR" sh "$HERE/audit.sh" "$LOGS" "$DIR/.wteam" > "$LOGS/audit.txt"
 head -1 "$LOGS/audit.txt" >> "$LOGS/metrics.txt"
+sh "$HERE/memorization.sh" "$LIB" "$DIR" >> "$LOGS/metrics.txt"
+sh "$HERE/archive.sh" "$DIR"
 cat "$LOGS/metrics.txt"
