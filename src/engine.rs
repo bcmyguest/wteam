@@ -181,17 +181,29 @@ fn run_git(dir: &Path, literal: bool, args: &[&str]) -> Result<String> {
 fn ticket_diff(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
     let mut diff = String::new();
     for (literal, specs) in path_groups(t, extras) {
-        let mut args = vec!["diff", "HEAD"];
+        let mut args = vec!["--no-optional-locks", "diff", "HEAD"];
         push_specs(&mut args, &specs);
         diff.push_str(&run_git(dir, literal, &args)?);
-        let mut args = vec!["ls-files", "--others", "--exclude-standard"];
+        let mut args = vec![
+            "--no-optional-locks",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ];
         push_specs(&mut args, &specs);
         for f in run_git(dir, literal, &args)?.lines() {
             let out = std::process::Command::new("git")
                 .arg("-C")
                 .arg(dir)
                 .env("GIT_LITERAL_PATHSPECS", "1")
-                .args(["diff", "--no-index", "--", "/dev/null", f])
+                .args([
+                    "--no-optional-locks",
+                    "diff",
+                    "--no-index",
+                    "--",
+                    "/dev/null",
+                    f,
+                ])
                 .output()
                 .context("running git diff --no-index")?;
             diff.push_str(&String::from_utf8_lossy(&out.stdout));
@@ -225,12 +237,12 @@ fn commit_ticket(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
                     return Err(e);
                 }
             }
-            let mut args = vec!["diff", "--cached", "--name-only"];
+            let mut args = vec!["--no-optional-locks", "diff", "--cached", "--name-only"];
             push_specs(&mut args, &specs);
             paths.extend(run_git(dir, literal, &args)?.lines().map(str::to_string));
         }
         if paths.is_empty() {
-            worktree::git(dir, &["diff", "--cached", "--quiet"])
+            worktree::git(dir, &["--no-optional-locks", "diff", "--cached", "--quiet"])
                 .context("nothing in the ticket's files changed, and other changes are staged")?;
             worktree::git(dir, &["commit", "--allow-empty", "-m", &msg])?;
         } else {
@@ -663,6 +675,53 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
     )?;
     Ok(agent)
 }
+
+/// Dispatch every dispatchable ready ticket, lowest id first, until no ticket is left or
+/// no pair is free. Returns `(ticket, agent)` per dispatch.
+pub fn fill(ctx: &Ctx) -> Result<Vec<(String, String)>> {
+    let tickets = work::load_tickets(&ctx.paths.tickets_dir())?;
+    let role = dispatch_role(ctx);
+    let mut started = Vec::new();
+    loop {
+        let s = crate::state::load(&ctx.paths)?;
+        let dirty = if s.run.isolation == "worktree" {
+            worktree::dirty_pairs(&ctx.paths, ctx.team.count(&role))
+        } else {
+            Vec::new()
+        };
+        let mut candidates = work::dispatchable(&tickets, &s, &dirty);
+        candidates.sort();
+        let Some(id) = candidates.first().cloned() else {
+            return Ok(started);
+        };
+        match dispatch(ctx, &id, None) {
+            Ok(agent) => started.push((id, agent)),
+            Err(e) => {
+                return Err(FillError {
+                    started,
+                    message: format!("{e:#}"),
+                }
+                .into());
+            }
+        }
+    }
+}
+
+/// A `fill` that stopped after dispatching `started`: those dispatches stand.
+#[derive(Debug)]
+pub struct FillError {
+    /// `(ticket, agent)` for each dispatch made before the failure.
+    pub started: Vec<(String, String)>,
+    message: String,
+}
+
+impl std::fmt::Display for FillError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for FillError {}
 
 /// Reject an `--extra` that is not one literal file path inside the repo, so a PASS
 /// cannot commit outside it. The error names the extra and the rule it broke.

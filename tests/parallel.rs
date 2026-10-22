@@ -290,3 +290,108 @@ fn worktree_brief_points_at_the_contract_by_absolute_path() {
     );
     assert!(contract.is_file());
 }
+
+#[test]
+fn fill_dispatches_lowest_ready_tickets_to_each_idle_pair() {
+    let r = repo_with_pairs(4);
+    for n in 1..=6 {
+        r.ticket(
+            &format!("0{n}"),
+            &format!("Add {n}"),
+            "None",
+            &format!("src/0{n}.txt"),
+            "",
+        );
+    }
+    let out = r.wteam().args(["dispatch", "--fill"]).assert().success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    for n in 1..=4 {
+        assert!(
+            text.contains(&format!("dispatched 0{n} to worker.{n}")),
+            "{text}"
+        );
+    }
+    assert!(!text.contains("dispatched 05"), "{text}");
+
+    let s = r.state();
+    for n in 1..=4 {
+        assert_eq!(s["tickets"][format!("0{n}")]["status"], "doing", "{s:#}");
+        assert_eq!(s["tickets"][format!("0{n}")]["pair"], n, "{s:#}");
+    }
+    assert_ne!(s["tickets"]["05"]["status"], "doing", "{s:#}");
+    go(&r);
+}
+
+#[test]
+fn fill_skips_a_ticket_whose_files_overlap_one_in_progress() {
+    let r = repo_with_pairs(4);
+    r.ticket("01", "Add one", "None", "src/a.txt", "");
+    r.ticket("02", "Add two", "None", "src/a.txt", "");
+    r.ticket("03", "Add three", "None", "src/b.txt", "");
+    let out = r.wteam().args(["dispatch", "--fill"]).assert().success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(text.contains("dispatched 01 to"), "{text}");
+    assert!(text.contains("dispatched 03 to"), "{text}");
+    assert!(!text.contains("dispatched 02"), "{text}");
+    assert_ne!(r.state()["tickets"]["02"]["status"], "doing");
+    go(&r);
+}
+
+#[test]
+fn fill_with_no_idle_pair_says_nothing_to_dispatch() {
+    let r = repo_with_pairs(1);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+
+    r.wteam()
+        .args(["dispatch", "--fill"])
+        .assert()
+        .success()
+        .stdout(contains("nothing to dispatch"));
+    let out = r
+        .wteam()
+        .args(["dispatch", "--fill", "--json"])
+        .output()
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        json["dispatched"].as_array().map(Vec::len),
+        Some(0),
+        "{json:#}"
+    );
+    go(&r);
+}
+
+#[test]
+fn fill_with_a_ticket_id_is_an_error() {
+    let r = repo_with_pairs(2);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam()
+        .args(["dispatch", "01", "--fill"])
+        .assert()
+        .failure();
+    assert_eq!(
+        r.state()["tickets"]["01"]["status"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
+fn fill_error_midway_still_lists_the_dispatches_that_stand() {
+    let r = repo_with_pairs(2);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    // A plain file where pair 2's worktree goes makes its dispatch fail after pair 1 started.
+    r.write(".wteam/demo/worktrees/pair2", "not a worktree\n");
+    let out = r
+        .wteam()
+        .args(["dispatch", "--fill", "--json"])
+        .assert()
+        .failure();
+    let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(json["dispatched"][0]["ticket"], "01", "{json:#}");
+    assert!(json["error"].as_str().is_some(), "{json:#}");
+    assert_eq!(r.state()["tickets"]["01"]["status"], "doing");
+    go(&r);
+}

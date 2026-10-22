@@ -486,3 +486,63 @@ fn stale_run_flag_with_dead_watcher_does_not_block_mail() {
     });
     assert_eq!(r.state()["run"]["active"], false);
 }
+
+/// Orchestrator that dispatches one ready ticket per turn, ignoring `--fill`.
+const ONE_PER_TURN: &str = r#"printf '%s\n=====\n' "$WTEAM_PROMPT" >> "$WTEAM_FAKE_DIR/orch-prompts"
+t=$(wteam ready | awk '/^[0-9]/{print $1; exit}')
+[ -n "$t" ] && wteam dispatch "$t" >/dev/null 2>&1
+true
+"#;
+
+/// Run `tickets` independent tickets on `pairs` worktree pairs, dispatching one per turn.
+fn one_per_turn_run(pairs: u32, tickets: u32) -> (Repo, String) {
+    let r = Repo::new("demo");
+    for n in 1..=tickets {
+        r.ticket(
+            &format!("{n:02}"),
+            &format!("Ticket {n}"),
+            "None",
+            &format!("src/{n:02}.txt"),
+            "",
+        );
+    }
+    r.use_fake_agents();
+    r.agent_script("orchestrator", ONE_PER_TURN);
+    // A slow worker keeps pairs busy across the orchestrator's idle re-prompts.
+    r.agent_script("worker", &format!("sleep 1\n{WORKER}"));
+    r.agent_script("reviewer", REVIEWER);
+    let pairs = pairs.to_string();
+    let text = run_ok(&r, &["--pairs", &pairs, "--isolation", "worktree"]);
+    (r, text)
+}
+
+#[test]
+fn one_dispatch_per_turn_runs_every_ticket_with_two_pairs() {
+    let (r, text) = one_per_turn_run(2, 5);
+    assert!(!text.contains("did not dispatch"), "{text}");
+    for n in 1..=5 {
+        assert_eq!(status_of(&r, &format!("{n:02}")), "done", "{text}");
+    }
+}
+
+#[test]
+fn one_dispatch_per_turn_runs_every_ticket_with_four_pairs() {
+    let (r, text) = one_per_turn_run(4, 8);
+    assert!(!text.contains("did not dispatch"), "{text}");
+    for n in 1..=8 {
+        assert_eq!(status_of(&r, &format!("{n:02}")), "done", "{text}");
+    }
+}
+
+#[test]
+fn kickoff_and_digest_end_with_the_fill_hint() {
+    let (r, _) = one_per_turn_run(2, 2);
+    let prompts = r.read(".wteam-fake/orch-prompts");
+    assert!(
+        prompts
+            .matches("Run `wteam dispatch --fill` to keep pairs busy.")
+            .count()
+            >= 2,
+        "{prompts}"
+    );
+}

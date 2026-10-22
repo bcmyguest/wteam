@@ -108,10 +108,15 @@ pub struct TicketArg {
 
 #[derive(Debug, Args)]
 pub struct DispatchArgs {
-    pub ticket: String,
+    /// Ticket to dispatch. Omit with `--fill`.
+    #[arg(required_unless_present = "fill", conflicts_with = "fill")]
+    pub ticket: Option<String>,
     /// Pair index (default: first idle pair).
     #[arg(long)]
     pub pair: Option<u32>,
+    /// Dispatch every dispatchable ready ticket to the idle pairs, lowest id first.
+    #[arg(long)]
+    pub fill: bool,
 }
 
 #[derive(Debug, Args)]
@@ -261,9 +266,24 @@ pub fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
+            // A fill that failed midway still reports the dispatches that stand.
+            let started = e
+                .downcast_ref::<crate::engine::FillError>()
+                .map(|f| f.started.clone())
+                .unwrap_or_default();
             if json {
-                println!("{}", serde_json::json!({ "error": format!("{e:#}") }));
+                let mut body = serde_json::json!({ "error": format!("{e:#}") });
+                if !started.is_empty() {
+                    body["dispatched"] = started
+                        .iter()
+                        .map(|(ticket, agent)| serde_json::json!({ "ticket": ticket, "agent": agent }))
+                        .collect();
+                }
+                println!("{body}");
             } else {
+                for (ticket, agent) in &started {
+                    println!("dispatched {ticket} to {agent}");
+                }
                 eprintln!("wteam: {e:#}");
             }
             ExitCode::FAILURE

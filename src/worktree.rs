@@ -65,7 +65,7 @@ pub fn dirty(paths: &Paths, pair: u32) -> bool {
     if !dir.is_dir() {
         return false;
     }
-    match git(&dir, &["status", "--porcelain"]) {
+    match git(&dir, &["--no-optional-locks", "status", "--porcelain"]) {
         Ok(status) => !status.trim().is_empty(),
         Err(_) => true,
     }
@@ -130,7 +130,16 @@ pub fn merge_back(paths: &Paths, pair: u32, ticket: &str) -> Result<String> {
     let branch = branch(&paths.slug, ticket);
     let base = git(&paths.root, &["rev-parse", "HEAD"])?.trim().to_string();
     if let Err(e) = git(&dir, &["rebase", &base]) {
-        let conflicts = git(&dir, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
+        let conflicts = git(
+            &dir,
+            &[
+                "--no-optional-locks",
+                "diff",
+                "--name-only",
+                "--diff-filter=U",
+            ],
+        )
+        .unwrap_or_default();
         let _ = git(&dir, &["rebase", "--abort"]);
         let paths_list: Vec<&str> = conflicts.lines().collect();
         if paths_list.is_empty() {

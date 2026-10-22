@@ -12,10 +12,31 @@ use crate::state::{TicketStatus, Verdict, VerdictKind};
 
 pub fn dispatch(g: &Global, a: &DispatchArgs) -> Result<Out> {
     let ctx = Ctx::load(super::effort(g)?)?;
-    let agent = engine::dispatch(&ctx, &a.ticket, a.pair)?;
+    if a.fill {
+        let started = engine::fill(&ctx)?;
+        let text = if started.is_empty() {
+            "nothing to dispatch".to_string()
+        } else {
+            started
+                .iter()
+                .map(|(ticket, agent)| format!("dispatched {ticket} to {agent}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let list: Vec<_> = started
+            .iter()
+            .map(|(ticket, agent)| json!({ "ticket": ticket, "agent": agent }))
+            .collect();
+        return Ok(Out::new(text, json!({ "dispatched": list })));
+    }
+    let ticket = a
+        .ticket
+        .as_deref()
+        .context("name a ticket, or pass --fill")?;
+    let agent = engine::dispatch(&ctx, ticket, a.pair)?;
     Ok(Out::new(
-        format!("dispatched {} to {agent}", a.ticket),
-        json!({ "ticket": a.ticket, "agent": agent }),
+        format!("dispatched {ticket} to {agent}"),
+        json!({ "ticket": ticket, "agent": agent }),
     ))
 }
 

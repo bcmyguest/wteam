@@ -43,6 +43,7 @@ wteam pickup --from .scratch/my-effort
 wteam status                          # tickets, agents, pending events
 wteam ready                           # tickets whose blockers are done
 wteam dispatch 01 --pair 1            # hand ticket 01 to worker.1
+wteam dispatch --fill                 # hand every dispatchable ready ticket to an idle pair
 wteam submit 01 --summary "Done"      # worker: finished round to review
 wteam verdict 01 pass --note "Nit"    # reviewer: pass with a note
 ```

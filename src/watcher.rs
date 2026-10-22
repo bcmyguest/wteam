@@ -5,6 +5,7 @@
 //! Its turns run here, in the foreground, through the adapter. Between turns the
 //! loop waits for workers and reviewers, then resumes it with a digest.
 
+use std::collections::BTreeSet;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -24,8 +25,11 @@ const POLL: Duration = Duration::from_millis(200);
 const ORCHESTRATOR: &str = "orchestrator.1";
 /// Sent once per generation, when its context passes the handoff threshold.
 const HANDOFF_PROMPT: &str = "Your context is nearly full. Write your handoff baton now, with these sections: Goal, Confirmed facts, Ruled out, Next steps, Constraints, Blockers. Reply with the baton only.";
-/// Appended to every kickoff.
-const INSTRUCTIONS: &str = "Dispatch every ready ticket to an idle pair with `wteam dispatch <ticket>`, then end your turn. The watcher resumes you with events; never call `wteam wait`.";
+/// Ends every kickoff and digest.
+const FILL_HINT: &str = "Run `wteam dispatch --fill` to keep pairs busy.";
+/// Appended to every kickoff, before the fill hint.
+const INSTRUCTIONS: &str =
+    "Then end your turn. The watcher resumes you with events; never call `wteam wait`.";
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -86,9 +90,11 @@ fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
         }
         // Handoff turns count toward --max-turns too.
         turns += 1;
+        let doing_before = doing_ids(ctx)?;
         if let Err(e) = orchestrator_turn(ctx, &prompt) {
             return Ok(turn_failed(&e));
         }
+        let dispatched = doing_ids(ctx)?.difference(&doing_before).next().is_some();
         if handoff_due(ctx)? {
             turns += 1;
             let baton = match orchestrator_turn(ctx, HANDOFF_PROMPT) {
@@ -104,7 +110,8 @@ fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
         // A spent budget means no re-prompt: the await below lets in-flight work finish and stops.
         let budget_spent = over_budget(&state::load(&ctx.paths)?).is_some();
         if !undispatched.is_empty() && idle_pairs > 0 && !budget_spent {
-            idle_turns += 1;
+            // A turn that started a ticket made progress; only a turn that started none is idle.
+            idle_turns = if dispatched { 0 } else { idle_turns + 1 };
             if idle_turns >= 2 {
                 return Ok(format!(
                     "orchestrator did not dispatch ready tickets: {}",
@@ -112,7 +119,7 @@ fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
                 ));
             }
             prompt = format!(
-                "Ready tickets are not dispatched: {}. Idle pairs: {idle_pairs}. Dispatch them now with `wteam dispatch <ticket>`, then end your turn.",
+                "Ready tickets are not dispatched: {}. Idle pairs: {idle_pairs}. Dispatch them now with `wteam dispatch --fill`, then end your turn.",
                 undispatched.join(", ")
             );
             continue;
@@ -174,6 +181,16 @@ fn dispatchable_ready(ctx: &Ctx) -> Result<Vec<String>> {
         .into_iter()
         .filter(|r| !in_progress.iter().any(|p| work::files_overlap(p, r)))
         .map(|r| r.id.clone())
+        .collect())
+}
+
+/// Ids of tickets whose worker turn is in progress.
+fn doing_ids(ctx: &Ctx) -> Result<BTreeSet<String>> {
+    let s = state::load(&ctx.paths)?;
+    Ok(s.tickets
+        .iter()
+        .filter(|(_, ts)| ts.status == TicketStatus::Doing)
+        .map(|(id, _)| id.clone())
         .collect())
 }
 
@@ -243,12 +260,14 @@ fn kickoff(ctx: &Ctx, baton: Option<&str>) -> Result<String> {
         None => {
             let goal = std::fs::read_to_string(ctx.paths.spec_file()).unwrap_or_default();
             let pairs = state::load(&ctx.paths)?.run.pairs;
-            format!("Goal:\n{goal}\nPairs: {pairs}\n\nReady:\n{ready}\n\n{INSTRUCTIONS}")
+            format!(
+                "Goal:\n{goal}\nPairs: {pairs}\n\nReady:\n{ready}\n\n{INSTRUCTIONS}\n{FILL_HINT}"
+            )
         }
         Some(baton) => {
             let status = wteam_output(ctx, "status")?;
             format!(
-                "Handoff from the previous orchestrator generation:\n{baton}\n\nStatus:\n{status}\n\n{INSTRUCTIONS}"
+                "Handoff from the previous orchestrator generation:\n{baton}\n\nStatus:\n{status}\n\n{INSTRUCTIONS}\n{FILL_HINT}"
             )
         }
     })
@@ -352,8 +371,12 @@ fn snapshot(ctx: &Ctx) -> Result<Snapshot> {
                 .unwrap_or_default();
             parts.push(format!("Message from {}{t}:\n{}", m.from, m.body));
         }
-        let digest = (!parts.is_empty())
-            .then(|| format!("Events since your last turn:\n\n{}", parts.join("\n\n")));
+        let digest = (!parts.is_empty()).then(|| {
+            format!(
+                "Events since your last turn:\n\n{}\n\n{FILL_HINT}",
+                parts.join("\n\n")
+            )
+        });
         Ok(Snapshot {
             digest,
             in_flight,

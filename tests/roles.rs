@@ -233,3 +233,17 @@ fn worker_and_reviewer_run_from_repo_root() {
         assert_mentions(name, &["no `git -C`"]);
     }
 }
+
+#[test]
+fn orchestrator_runs_one_command_per_shell_call_and_fills_pairs() {
+    assert_mentions(
+        "orchestrator",
+        &[
+            "exactly one command per shell call",
+            "no `&&`, `;` or `|`",
+            "If `wteam` itself is denied",
+            "naming the denied command",
+            "wteam dispatch --fill",
+        ],
+    );
+}

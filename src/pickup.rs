@@ -192,7 +192,13 @@ fn dirty_tree(root: &Path, from: Option<&Path>) -> Vec<String> {
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["status", "--porcelain", "-z", "--untracked-files=all"])
+        .args([
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=all",
+        ])
         .output();
     let out = match out {
         Ok(o) if o.status.success() => o,
