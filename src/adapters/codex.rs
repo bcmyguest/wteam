@@ -20,6 +20,7 @@ impl Adapter for Codex {
         if let Some(id) = &req.session_id {
             args.extend(["resume".into(), "--json".into()]);
             args.extend(req.permissions.args.iter().cloned());
+            args.extend(wteam_dir_args(req));
             args.extend(req.extra_args.iter().cloned());
             args.extend([id.clone(), req.prompt.clone()]);
         } else {
@@ -28,6 +29,7 @@ impl Adapter for Codex {
                 args.extend(["-m".into(), model.clone()]);
             }
             args.extend(req.permissions.args.iter().cloned());
+            args.extend(wteam_dir_args(req));
             args.extend(req.extra_args.iter().cloned());
             args.push(match &req.role_prompt {
                 Some(role) => format!("{role}\n\n{}", req.prompt),
@@ -92,6 +94,18 @@ impl Adapter for Codex {
             .filter_map(|ev| ev["payload"]["info"]["last_token_usage"]["input_tokens"].as_u64())
             .next_back()
     }
+}
+
+/// Make `<root>/.wteam` writable so `wteam` calls inside codex's sandbox can update state.
+/// `--add-dir` exists on `codex exec` but `codex exec resume` rejects it (codex-cli 0.156.1),
+/// so both turns use the `-c` config override for `sandbox_workspace_write.writable_roots`.
+fn wteam_dir_args(req: &TurnRequest) -> Vec<String> {
+    let dir = req.cwd.join(".wteam").display().to_string();
+    let roots = serde_json::Value::String(dir).to_string();
+    vec![
+        "-c".into(),
+        format!("sandbox_workspace_write.writable_roots=[{roots}]"),
+    ]
 }
 
 /// Track the `rollout-*<suffix>` file under `dir` with the greatest name; names embed a timestamp.

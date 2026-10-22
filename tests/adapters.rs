@@ -178,6 +178,8 @@ fn codex_first_turn_command() {
             "m1",
             "--perm",
             "x",
+            "-c",
+            r#"sandbox_workspace_write.writable_roots=["/work/.wteam"]"#,
             "--extra",
             "ROLE\n\ndo it"
         ])
@@ -189,13 +191,23 @@ fn codex_first_turn_command() {
     assert_eq!(c.stdin, Some(String::new()));
 }
 
+/// `codex exec resume` rejects `--add-dir` (codex-cli 0.156.1), so the `.wteam` dir goes via `-c`.
 #[test]
 fn codex_resume_command() {
     let c = Codex.command(&resume());
     assert_eq!(
         c.args,
         s(&[
-            "exec", "resume", "--json", "--perm", "x", "--extra", "sess-9", "do it"
+            "exec",
+            "resume",
+            "--json",
+            "--perm",
+            "x",
+            "-c",
+            r#"sandbox_workspace_write.writable_roots=["/work/.wteam"]"#,
+            "--extra",
+            "sess-9",
+            "do it"
         ])
     );
     assert_eq!(c.stdin, Some(String::new()));
