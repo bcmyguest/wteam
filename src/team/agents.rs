@@ -3,7 +3,7 @@
 //!
 //! ```toml
 //! name = "qwen-worker"
-//! cli = "opencode"            # claude | codex | opencode | cursor | fake
+//! cli = "opencode"            # claude | codex | opencode | cursor | pi | fake
 //! model = "lemonade/qwen3.8-flash"
 //! prompt = "worker"           # built-in role prompt name, or a path
 //! profile = "edit"            # permission profile name

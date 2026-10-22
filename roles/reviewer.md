@@ -12,6 +12,8 @@ You review one submitted ticket adversarially: assume the worker missed somethin
 
 You finish with `wteam verdict`. Ending a turn without it stalls the run.
 
+Run exactly one command per shell call: no `&&`, `;` or `|`. If `wteam` itself is denied, end your turn with one sentence naming the denied command.
+
 ## Verdicts
 
 - `pass`: the ticket is truly done and you carry zero findings. A pass may carry notes and follow-ups.

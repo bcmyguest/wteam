@@ -49,7 +49,7 @@ fn resume() -> TurnRequest {
 
 #[test]
 fn claude_first_turn_command() {
-    let c = Claude.command(&first());
+    let c = Claude.command_for(&first(), false);
     assert_eq!(c.program, "claude");
     assert_eq!(
         c.args,
@@ -59,6 +59,9 @@ fn claude_first_turn_command() {
             "--output-format",
             "stream-json",
             "--verbose",
+            "--setting-sources",
+            "project,local",
+            "--disable-slash-commands",
             "--model",
             "m1",
             "--append-system-prompt",
@@ -78,7 +81,33 @@ fn claude_first_turn_command() {
 
 #[test]
 fn claude_resume_command_omits_role_prompt() {
-    let c = Claude.command(&resume());
+    let c = Claude.command_for(&resume(), false);
+    assert_eq!(
+        c.args,
+        s(&[
+            "-p",
+            "do it",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--setting-sources",
+            "project,local",
+            "--disable-slash-commands",
+            "--model",
+            "m1",
+            "--resume",
+            "sess-9",
+            "--perm",
+            "x",
+            "--extra"
+        ])
+    );
+}
+
+/// `WTEAM_CLAUDE_USER_SETTINGS=1` drops both isolation flags. `command` reads that variable.
+#[test]
+fn claude_user_settings_opt_out_omits_isolation_flags() {
+    let c = Claude.command_for(&first(), true);
     assert_eq!(
         c.args,
         s(&[
@@ -89,8 +118,8 @@ fn claude_resume_command_omits_role_prompt() {
             "--verbose",
             "--model",
             "m1",
-            "--resume",
-            "sess-9",
+            "--append-system-prompt",
+            "ROLE",
             "--perm",
             "x",
             "--extra"

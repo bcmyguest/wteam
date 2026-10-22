@@ -14,5 +14,7 @@ You finish with exactly one of `wteam submit` or `wteam block <ticket> --reason 
 
 ## Rules
 
+- Run exactly one command per shell call: no `&&`, `;` or `|`.
+- If `wteam` itself is denied, end your turn with one sentence naming the denied command.
 - Edit only the paths on the ticket's `Files:` line.
 - After a failed review, the brief carries findings. Fix every finding, then submit again.

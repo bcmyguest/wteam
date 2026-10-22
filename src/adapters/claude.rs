@@ -7,12 +7,19 @@ use super::{Adapter, CommandSpec, TurnOutput, TurnRequest};
 
 pub struct Claude;
 
-impl Adapter for Claude {
-    fn name(&self) -> &'static str {
-        "claude"
-    }
+/// Set to `1` to let agents read the user's Claude settings, hooks and skills.
+pub const USER_SETTINGS_ENV: &str = "WTEAM_CLAUDE_USER_SETTINGS";
 
-    fn command(&self, req: &TurnRequest) -> CommandSpec {
+/// True only when the `WTEAM_CLAUDE_USER_SETTINGS` value is exactly `1`.
+pub fn user_settings_from(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+impl Claude {
+    /// The command for one turn. `user_settings` keeps the user's config: when false, agents
+    /// get `--setting-sources project,local` (no user hooks or permission rules) and
+    /// `--disable-slash-commands` (no user skills). Both flags are in `claude --help` (2.1.307).
+    pub fn command_for(&self, req: &TurnRequest, user_settings: bool) -> CommandSpec {
         let mut args: Vec<String> = vec![
             "-p".into(),
             req.prompt.clone(),
@@ -20,6 +27,13 @@ impl Adapter for Claude {
             "stream-json".into(),
             "--verbose".into(),
         ];
+        if !user_settings {
+            args.extend([
+                "--setting-sources".into(),
+                "project,local".into(),
+                "--disable-slash-commands".into(),
+            ]);
+        }
         if let Some(model) = &req.model {
             args.extend(["--model".into(), model.clone()]);
         }
@@ -39,6 +53,17 @@ impl Adapter for Claude {
             cwd: req.cwd.clone(),
             stdin: None,
         }
+    }
+}
+
+impl Adapter for Claude {
+    fn name(&self) -> &'static str {
+        "claude"
+    }
+
+    fn command(&self, req: &TurnRequest) -> CommandSpec {
+        let value = std::env::var(USER_SETTINGS_ENV).ok();
+        self.command_for(req, user_settings_from(value.as_deref()))
     }
 
     /// Session id from any event, context from the last top-level `assistant`
@@ -85,5 +110,20 @@ impl Adapter for Claude {
             }
             None => bail!("claude: output has no result event"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::user_settings_from;
+
+    #[test]
+    fn only_exact_one_enables_user_settings() {
+        assert!(user_settings_from(Some("1")));
+        assert!(!user_settings_from(None));
+        assert!(!user_settings_from(Some("")));
+        assert!(!user_settings_from(Some("0")));
+        assert!(!user_settings_from(Some("true")));
+        assert!(!user_settings_from(Some("1 ")));
     }
 }

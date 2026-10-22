@@ -85,7 +85,20 @@ mod tests {
       "Shell(git status *)",
       "Shell(cargo *)",
       "Shell(npm *)",
-      "Shell(pytest *)"
+      "Shell(pytest *)",
+      "Shell(cd *)",
+      "Shell(ls *)",
+      "Shell(cat *)",
+      "Shell(head *)",
+      "Shell(tail *)",
+      "Shell(grep *)",
+      "Shell(rg *)",
+      "Shell(wc *)",
+      "Shell(pwd)",
+      "Shell(python3 -m pytest *)",
+      "Shell(go test *)",
+      "Shell(make test)",
+      "Shell(make check)"
     ],
     "deny": [
       "Shell(git push *)",
@@ -96,7 +109,7 @@ mod tests {
 }
 "#
         );
-        assert_eq!(t.support.len(), 11);
+        assert_eq!(t.support.len(), 24);
         let ask = t
             .support
             .iter()
@@ -111,7 +124,7 @@ mod tests {
                 .iter()
                 .filter(|s| s.support == Support::Exact)
                 .count(),
-            10
+            23
         );
     }
 

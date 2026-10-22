@@ -210,7 +210,7 @@ pub struct PermissionsArgs {
     /// Profiles to show (default: every built-in profile).
     #[arg(long = "profile")]
     pub profiles: Vec<String>,
-    /// CLIs to show (default: claude, codex, opencode, cursor).
+    /// CLIs to show: claude, codex, opencode, cursor, pi (default: the first four).
     #[arg(long = "cli")]
     pub clis: Vec<String>,
 }

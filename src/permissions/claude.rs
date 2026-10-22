@@ -54,16 +54,16 @@ mod tests {
             t.args,
             [
                 "--settings",
-                r#"{"permissions":{"allow":["Bash(wteam *)","Bash(git status *)","Bash(git log *)","Bash(git diff *)","Read(**)"],"ask":[],"deny":["Edit(**)"]}}"#,
+                r#"{"permissions":{"allow":["Bash(wteam *)","Bash(git status *)","Bash(git log *)","Bash(git diff *)","Read(**)","Bash(cd *)","Bash(ls *)","Bash(cat *)","Bash(head *)","Bash(tail *)","Bash(grep *)","Bash(rg *)","Bash(wc *)","Bash(pwd)"],"ask":[],"deny":["Edit(**)"]}}"#,
                 "--permission-mode",
                 "dontAsk",
             ]
         );
         assert!(t.env.is_empty() && t.files.is_empty());
-        assert_eq!(t.support.len(), 6);
+        assert_eq!(t.support.len(), 15);
         assert!(t.support.iter().all(|s| s.support == Support::Exact));
-        assert_eq!(t.support[5].decision, Decision::Deny);
-        assert_eq!(t.support[5].rule, "Edit(**)");
+        assert_eq!(t.support[14].decision, Decision::Deny);
+        assert_eq!(t.support[14].rule, "Edit(**)");
     }
 
     #[test]

@@ -20,6 +20,16 @@ fn no_args_shows_every_builtin_across_four_clis() {
 }
 
 #[test]
+fn cli_help_lists_pi() {
+    let r = Repo::new("demo");
+    r.wteam()
+        .args(["permissions", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("cursor, pi"));
+}
+
+#[test]
 fn filters_by_profile_and_cli() {
     let r = Repo::new("demo");
     let out = r

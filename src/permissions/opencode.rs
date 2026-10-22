@@ -116,11 +116,11 @@ mod tests {
             t.env,
             [(
                 "OPENCODE_PERMISSION".to_string(),
-                r#"{"bash":{"*":"deny","wteam *":"allow","git diff *":"allow","git status *":"allow","cargo *":"allow","npm *":"allow","pytest *":"allow","git push *":"ask","rm -rf *":"deny"},"read":{"*":"allow","**/.env":"deny"},"edit":{"*":"allow"},"webfetch":{"*":"deny"}}"#
+                r#"{"bash":{"*":"deny","wteam *":"allow","git diff *":"allow","git status *":"allow","cargo *":"allow","npm *":"allow","pytest *":"allow","cd *":"allow","ls *":"allow","cat *":"allow","head *":"allow","tail *":"allow","grep *":"allow","rg *":"allow","wc *":"allow","pwd":"allow","python3 -m pytest *":"allow","go test *":"allow","make test":"allow","make check":"allow","git push *":"ask","rm -rf *":"deny"},"read":{"*":"allow","**/.env":"deny"},"edit":{"*":"allow"},"webfetch":{"*":"deny"}}"#
                     .to_string()
             )]
         );
-        assert_eq!(t.support.len(), 11);
+        assert_eq!(t.support.len(), 24);
         assert!(t.support.iter().all(|s| s.support == Support::Exact));
         let v: serde_json::Value = serde_json::from_str(&t.env[0].1).unwrap();
         assert_eq!(v["read"]["**/.env"], "deny");

@@ -123,11 +123,24 @@ prefix_rule(pattern=["git", "status"], decision="allow")
 prefix_rule(pattern=["cargo"], decision="allow")
 prefix_rule(pattern=["npm"], decision="allow")
 prefix_rule(pattern=["pytest"], decision="allow")
+prefix_rule(pattern=["cd"], decision="allow")
+prefix_rule(pattern=["ls"], decision="allow")
+prefix_rule(pattern=["cat"], decision="allow")
+prefix_rule(pattern=["head"], decision="allow")
+prefix_rule(pattern=["tail"], decision="allow")
+prefix_rule(pattern=["grep"], decision="allow")
+prefix_rule(pattern=["rg"], decision="allow")
+prefix_rule(pattern=["wc"], decision="allow")
+prefix_rule(pattern=["pwd"], decision="allow")
+prefix_rule(pattern=["python3", "-m", "pytest"], decision="allow")
+prefix_rule(pattern=["go", "test"], decision="allow")
+prefix_rule(pattern=["make", "test"], decision="allow")
+prefix_rule(pattern=["make", "check"], decision="allow")
 prefix_rule(pattern=["git", "push"], decision="prompt")
 prefix_rule(pattern=["rm", "-rf"], decision="forbidden")
 "#
         );
-        assert_eq!(t.support.len(), 11);
+        assert_eq!(t.support.len(), 24);
         assert_eq!(
             t.support[0].support,
             Support::Lossy("sandbox workspace-write".into())

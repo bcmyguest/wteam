@@ -81,6 +81,21 @@ fn worker_names_its_commands() {
 }
 
 #[test]
+fn worker_and_reviewer_run_one_command_per_shell_call() {
+    for name in ["worker", "reviewer"] {
+        assert_mentions(
+            name,
+            &[
+                "exactly one command per shell call",
+                "no `&&`, `;` or `|`",
+                "If `wteam` itself is denied",
+                "naming the denied command",
+            ],
+        );
+    }
+}
+
+#[test]
 fn reviewer_names_its_commands() {
     assert_mentions(
         "reviewer",

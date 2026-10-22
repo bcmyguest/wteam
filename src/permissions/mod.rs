@@ -139,6 +139,15 @@ pub fn builtin(name: &str) -> Option<Profile> {
                 "Bash(git log *)",
                 "Bash(git diff *)",
                 "Read(**)",
+                "Bash(cd *)",
+                "Bash(ls *)",
+                "Bash(cat *)",
+                "Bash(head *)",
+                "Bash(tail *)",
+                "Bash(grep *)",
+                "Bash(rg *)",
+                "Bash(wc *)",
+                "Bash(pwd)",
             ],
             &[],
             &["Edit(**)"],
@@ -152,6 +161,19 @@ pub fn builtin(name: &str) -> Option<Profile> {
                 "Bash(cargo test *)",
                 "Bash(npm test *)",
                 "Bash(pytest *)",
+                "Bash(cd *)",
+                "Bash(ls *)",
+                "Bash(cat *)",
+                "Bash(head *)",
+                "Bash(tail *)",
+                "Bash(grep *)",
+                "Bash(rg *)",
+                "Bash(wc *)",
+                "Bash(pwd)",
+                "Bash(python3 -m pytest *)",
+                "Bash(go test *)",
+                "Bash(make test)",
+                "Bash(make check)",
             ],
             &[],
             &["Edit(**)"],
@@ -166,6 +188,19 @@ pub fn builtin(name: &str) -> Option<Profile> {
                 "Bash(cargo *)",
                 "Bash(npm *)",
                 "Bash(pytest *)",
+                "Bash(cd *)",
+                "Bash(ls *)",
+                "Bash(cat *)",
+                "Bash(head *)",
+                "Bash(tail *)",
+                "Bash(grep *)",
+                "Bash(rg *)",
+                "Bash(wc *)",
+                "Bash(pwd)",
+                "Bash(python3 -m pytest *)",
+                "Bash(go test *)",
+                "Bash(make test)",
+                "Bash(make check)",
             ],
             &["Bash(git push *)"],
             &["Read(**/.env)", "Bash(rm -rf *)"],
@@ -364,6 +399,50 @@ mod tests {
 
     #[test]
     fn builtins_match_contract() {
+        let shell_basics = [
+            "Bash(cd *)",
+            "Bash(ls *)",
+            "Bash(cat *)",
+            "Bash(head *)",
+            "Bash(tail *)",
+            "Bash(grep *)",
+            "Bash(rg *)",
+            "Bash(wc *)",
+            "Bash(pwd)",
+        ];
+        let runners = [
+            "Bash(python3 -m pytest *)",
+            "Bash(go test *)",
+            "Bash(make test)",
+            "Bash(make check)",
+        ];
+        // `find` writes (`-exec`, `-delete`), so no profile allows it.
+        for name in ["control", "review", "edit"] {
+            let p = builtin(name).unwrap();
+            assert!(
+                !p.allow.iter().any(|a| a == "Bash(find *)"),
+                "{name} allows find"
+            );
+        }
+        for name in ["control", "review", "edit"] {
+            let p = builtin(name).unwrap();
+            for rule in shell_basics {
+                assert!(p.allow.iter().any(|a| a == rule), "{name} lacks {rule}");
+            }
+        }
+        for name in ["review", "edit"] {
+            let p = builtin(name).unwrap();
+            for rule in runners {
+                assert!(p.allow.iter().any(|a| a == rule), "{name} lacks {rule}");
+            }
+        }
+        let control = builtin("control").unwrap();
+        for rule in runners {
+            assert!(
+                !control.allow.iter().any(|a| a == rule),
+                "control has {rule}"
+            );
+        }
         let edit = builtin("edit").unwrap();
         assert_eq!(edit.ask, ["Bash(git push *)"]);
         assert_eq!(edit.deny, ["Read(**/.env)", "Bash(rm -rf *)"]);
