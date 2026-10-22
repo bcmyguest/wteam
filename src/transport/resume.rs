@@ -6,6 +6,7 @@ use std::io::Write;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 
@@ -33,14 +34,22 @@ impl Transport for Resume {
         }
         let spawned = claim(&ctx.paths, agent)?;
         let Some(stamp) = spawned else {
+            trace(&ctx.paths, agent, "deliver claim refused: busy")?;
             return Ok(());
         };
+        trace(&ctx.paths, agent, &format!("deliver claim stamp={stamp}"))?;
         match spawn_turn(ctx, agent) {
             Ok(pid) => {
+                trace(&ctx.paths, agent, &format!("deliver spawned pid={pid}"))?;
                 // One lock for decide and write: a stop between them would leave a running
                 // child recorded on an idle agent.
                 let decision =
                     state::with_state(&ctx.paths, |s| Ok(record_or_kill(s, agent, stamp, pid)))?;
+                trace(
+                    &ctx.paths,
+                    agent,
+                    &format!("deliver record pid={pid} decision={decision:?}"),
+                )?;
                 if decision == Decision::KillChild {
                     if crate::engine::pid_alive(pid) {
                         crate::commands::stop::kill_group(pid);
@@ -56,6 +65,7 @@ impl Transport for Resume {
                 Ok(())
             }
             Err(e) => {
+                trace(&ctx.paths, agent, &format!("deliver spawn error: {e:#}"))?;
                 state::with_state(&ctx.paths, |s| {
                     let st = s.agents.entry(agent.to_string()).or_default();
                     st.busy = false;
@@ -92,15 +102,44 @@ fn record_or_kill(s: &mut State, agent: &str, stamp: u64, pid: u32) -> Decision 
 
 /// Append one line to the agent's process log.
 fn log_line(ctx: &Ctx, agent: &str, line: &str) -> Result<()> {
-    use std::io::Write;
-    std::fs::create_dir_all(ctx.paths.logs_dir())?;
-    let path = ctx.paths.logs_dir().join(format!("{agent}-process.log"));
+    trace(&ctx.paths, agent, line.trim_end())
+}
+
+/// Append `msg` to `agent`'s process log, prefixed with the current UTC time
+/// (`2026-10-22T20:01:02Z deliver claim stamp=…`). The log is the turn-lifecycle trace.
+pub fn trace(paths: &crate::paths::Paths, agent: &str, msg: &str) -> Result<()> {
+    std::fs::create_dir_all(paths.logs_dir())?;
+    let path = paths.logs_dir().join(format!("{agent}-process.log"));
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
-        .and_then(|mut f| f.write_all(line.as_bytes()))
+        .and_then(|mut f| writeln!(f, "{} {msg}", utc_iso(secs)))
         .with_context(|| format!("writing {}", path.display()))
+}
+
+/// `secs` since the Unix epoch as UTC ISO-8601 (`YYYY-MM-DDTHH:MM:SSZ`).
+fn utc_iso(secs: i64) -> String {
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 /// Mark `agent` busy for a new turn. Busy, the old pid and the spawn stamp change under one
@@ -229,6 +268,7 @@ fn settle(s: &mut State, agent: &str, role: &str) -> Settle {
 
 /// Run turns for `agent` until its mailbox has no undelivered mail, then settle the silence.
 pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
+    let mut ran = false;
     loop {
         let next = state::with_state(&ctx.paths, |s| {
             let (role, index) = parse_instance(agent);
@@ -275,7 +315,10 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
             }
         };
         match next {
-            Turn::Stop => return Ok(()),
+            Turn::Stop => {
+                trace(&ctx.paths, agent, "release idle")?;
+                return Ok(());
+            }
             Turn::Reprompt(body) => {
                 crate::mailbox::append(&ctx.paths, agent, "wteam", &body)?;
             }
@@ -286,6 +329,7 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
                     release(s, agent);
                     Ok(())
                 })?;
+                trace(&ctx.paths, agent, &format!("release blocked {id}"))?;
                 let mut note = format!("Ticket {id} blocked by {agent}: {reason}");
                 if let Some(kept) = blocked? {
                     note.push('\n');
@@ -295,10 +339,21 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
                 return Ok(());
             }
             Turn::Run(first, session, turn, prompt) => {
+                if ran {
+                    trace(&ctx.paths, agent, "mail at turn end: next turn")?;
+                }
+                ran = true;
+                trace(
+                    &ctx.paths,
+                    agent,
+                    &format!("turn start turn={turn} first={first}"),
+                )?;
                 if let Err(e) = one_turn(ctx, agent, first, session, turn, &prompt, false) {
+                    trace(&ctx.paths, agent, &format!("turn end turn={turn} error"))?;
                     fail_turn(ctx, agent, &format!("{e:#}"))?;
                     return Ok(());
                 }
+                trace(&ctx.paths, agent, &format!("turn end turn={turn}"))?;
             }
         }
     }
@@ -667,6 +722,13 @@ mod tests {
         assert_eq!(st.session_id, None);
         assert_eq!(st.session_turns, 0);
         assert_eq!(st.session_ticket.as_deref(), Some("02"));
+    }
+
+    #[test]
+    fn utc_iso_formats_epoch_and_a_known_instant() {
+        assert_eq!(utc_iso(0), "1970-01-01T00:00:00Z");
+        assert_eq!(utc_iso(1_700_000_000), "2023-11-14T22:13:20Z");
+        assert_eq!(utc_iso(951_782_400), "2000-02-29T00:00:00Z");
     }
 
     #[test]

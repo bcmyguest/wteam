@@ -65,7 +65,7 @@ pub fn heal(ctx: &Ctx) -> Result<()> {
     let revived = crate::state::with_state(&ctx.paths, |s| {
         let now = crate::state::now_nanos();
         let live = clear_stale_run(s);
-        let mut dead: Vec<(String, Option<u32>)> = Vec::new();
+        let mut dead: Vec<(String, String)> = Vec::new();
         // A live run's orchestrator turn runs in the watcher's foreground: not heal's to reset.
         let skip = |name: &str| live && parse_instance(name).0 == "orchestrator";
         for (name, a) in s
@@ -73,28 +73,31 @@ pub fn heal(ctx: &Ctx) -> Result<()> {
             .iter_mut()
             .filter(|(name, a)| a.busy && !skip(name.as_str()))
         {
+            let age = a.turn_spawned_at.map_or("no stamp".to_string(), |t| {
+                format!("spawn age {}s", now.saturating_sub(t) / 1_000_000_000)
+            });
             let gone = match a.turn_pid {
-                Some(pid) => (!pid_alive(pid)).then_some(Some(pid)),
+                Some(pid) => (!pid_alive(pid)).then(|| format!("dead pid {pid}")),
                 None => a
                     .turn_spawned_at
                     .is_none_or(|t| now.saturating_sub(t) > SPAWN_GRACE_NANOS)
-                    .then_some(None),
+                    .then(|| format!("no pid, {age}")),
             };
-            if let Some(pid) = gone {
+            if let Some(reason) = gone {
                 a.busy = false;
                 a.turn_pid = None;
                 a.turn_spawned_at = None;
-                dead.push((name.clone(), pid));
+                dead.push((name.clone(), reason));
             }
         }
         let mut revived = Vec::new();
-        for (name, pid) in dead {
+        for (name, reason) in dead {
             let held = s.tickets.values().any(|t| {
                 t.assignee.as_deref() == Some(name.as_str())
                     && matches!(t.status, TicketStatus::Doing | TicketStatus::Review)
             });
             let offset = s.agents.get(&name).map_or(0, |a| a.mail_delivered);
-            revived.push((name, pid, held, offset));
+            revived.push((name, reason, held, offset));
         }
         Ok(revived)
     })?;
@@ -103,21 +106,15 @@ pub fn heal(ctx: &Ctx) -> Result<()> {
     }
     let transport = crate::state::load(&ctx.paths)?.run.transport;
     let transport = crate::transport::for_name(&transport)?;
-    for (agent, pid, held, offset) in revived {
-        let log = ctx.paths.logs_dir().join(format!("{agent}-process.log"));
-        std::fs::create_dir_all(ctx.paths.logs_dir())?;
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log)
-            .with_context(|| format!("opening {}", log.display()))?;
-        let line = match pid {
-            Some(pid) => format!("wteam: turn process {pid} is gone; busy reset\n"),
-            None => "wteam: turn spawn never reported a pid; busy reset\n".to_string(),
-        };
-        std::io::Write::write_all(&mut f, line.as_bytes())?;
+    for (agent, reason, held, offset) in revived {
+        crate::transport::resume::trace(
+            &ctx.paths,
+            &agent,
+            &format!("heal reset reason={reason}; busy reset"),
+        )?;
         let (mail, _) = crate::mailbox::read_from(&ctx.paths, &agent, offset)?;
         if held || !mail.trim().is_empty() {
+            crate::transport::resume::trace(&ctx.paths, &agent, "heal redeliver")?;
             transport.deliver(ctx, &agent)?;
         }
     }

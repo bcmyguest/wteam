@@ -245,3 +245,104 @@ fn silent_reviewer_is_reprompted_then_blocked() {
     let mail = r.read(".wteam/demo/mail/reviewer.1.md");
     assert!(mail.contains("wteam verdict 01 pass|fail"), "{mail}");
 }
+
+#[test]
+fn ticket_dispatched_during_busy_turn_runs_after_it_ends() {
+    let r = repo();
+    r.ticket("02", "Other thing", "None", "src/b.txt", "true");
+    r.agent_script(
+        "worker",
+        "case \"$WTEAM_PROMPT\" in\n\
+         *\"(ticket 01)\"*) wteam submit 01 --summary a; sleep 3 ;;\n\
+         *\"(ticket 02)\"*) wteam submit 02 --summary b ;;\n\
+         esac\n",
+    );
+    r.agent_script("reviewer", "wteam verdict 01 pass; wteam verdict 02 pass\n");
+    dispatch(&r);
+    r.wait_for(20, |s| {
+        s["tickets"]["01"]["status"] == "done" && s["agents"]["worker.1"]["busy"] == true
+    });
+    r.wteam()
+        .env("WTEAM_BACKOFF_SCALE", "0")
+        .args(["dispatch", "02"])
+        .assert()
+        .success();
+    let s = r.wait_for(20, |s| {
+        s["tickets"]["02"]["status"] == "done" && s["agents"]["worker.1"]["busy"] == false
+    });
+    assert_eq!(s["tickets"]["02"]["status"], "done", "{s:#}");
+}
+
+#[test]
+fn turn_lifecycle_is_traced_in_order() {
+    let r = repo();
+    r.agent_script("worker", "wteam submit 01 --summary done\n");
+    r.agent_script("reviewer", PASS);
+    dispatch(&r);
+    r.wait_for(20, done);
+    // The turn process writes its last line after releasing busy, so poll for it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let log = loop {
+        let log = r.read(".wteam/demo/logs/worker.1-process.log");
+        if log.contains("release idle") || std::time::Instant::now() >= deadline {
+            break log;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let at = |n: &str| log.find(n).unwrap_or_else(|| panic!("no `{n}` in:\n{log}"));
+    // Order holds within each process: the parent's deliver lines, then the child's turn
+    // lines. The parent's `spawned` and the child's `turn start` race, so they are not ordered.
+    let parent = ["deliver claim stamp=", "deliver spawned pid="].map(at);
+    let child = [
+        "turn start turn=1 first=true",
+        "turn end turn=1",
+        "release idle",
+    ]
+    .map(at);
+    assert!(parent[0] < parent[1], "deliver out of order:\n{log}");
+    assert!(
+        parent[0] < child[0],
+        "turn started before its claim:\n{log}"
+    );
+    assert!(
+        child.windows(2).all(|w| w[0] < w[1]),
+        "turn out of order:\n{log}"
+    );
+    assert!(
+        log.lines().all(|l| l.starts_with("20")),
+        "untimestamped line:\n{log}"
+    );
+}
+
+#[test]
+fn run_revives_busy_agent_without_pid_within_grace() {
+    let r = repo();
+    r.agent_script("orchestrator", "echo ok\n");
+    r.agent_script("worker", "wteam submit 01 --summary done\n");
+    r.agent_script("reviewer", PASS);
+    // Worker 1 holds ticket 01 and is busy with no pid: its spawn stamp is fresh, so only
+    // the run's own polling can reset it.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    r.write(
+        ".wteam/demo/state.json",
+        &format!(
+            r#"{{"slug":"demo","tickets":{{"01":{{"status":"doing","assignee":"worker.1","pair":1}}}},
+               "agents":{{"worker.1":{{"role":"worker","index":1,"busy":true,"turn_spawned_at":{now}}}}}}}"#
+        ),
+    );
+    let out = r
+        .wteam()
+        .env("WTEAM_BACKOFF_SCALE", "0")
+        .args(["run", "--timeout", "120"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(!text.contains("timed out"), "{text}");
+    let s = r.state();
+    assert_eq!(s["tickets"]["01"]["status"], "done", "{s:#}");
+    let log = r.read(".wteam/demo/logs/worker.1-process.log");
+    assert!(log.contains("busy reset"), "{log}");
+}
