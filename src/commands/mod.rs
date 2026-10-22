@@ -6,11 +6,14 @@ pub mod init;
 pub mod mail;
 pub mod permissions;
 pub mod pickup;
+pub mod report;
 pub mod run;
 pub mod setup;
 pub mod status;
+pub mod stop;
 pub mod tickets;
 pub mod turn;
+pub mod wait;
 
 use anyhow::Result;
 
@@ -57,11 +60,11 @@ pub fn run(g: &Global, cmd: &Command) -> Result<Out> {
         Command::Approve(a) => tickets::approve(g, a),
         Command::Send(a) => mail::send(g, a),
         Command::Inbox(a) => mail::inbox(g, a),
-        Command::Wait(a) => mail::wait(g, a),
+        Command::Wait(a) => wait::run(g, a),
         Command::Run(a) => run::run(g, a),
-        Command::Stop => run::stop(g),
-        Command::Restore => run::restore(g),
-        Command::Report => run::report(g),
+        Command::Stop => stop::stop(g),
+        Command::Restore => stop::restore(g),
+        Command::Report => report::run(g),
         Command::Graph(a) => graph::run(g, a),
         Command::Permissions(a) => permissions::run(g, a),
         Command::Config(c) => config::run(g, c),
