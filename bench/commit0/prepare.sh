@@ -3,13 +3,14 @@
 # the library's function bodies are stubbed, its spec is unpacked, and its tests are REMOVED
 # (graded later from pristine copies). History is re-initialised so agents cannot recover
 # the original implementation from git.
-#   sh prepare.sh <lib> <out dir> [wteam]      libs: tinydb voluptuous (see LIBS below)
+#   sh prepare.sh <lib> <out dir> [wteam]      libs: tinydb voluptuous bitstring marshmallow imapclient (see LIBS below)
 set -eu
 LIB="$1"; OUT="$2"; MODE="${3:-}"
 CACHE="${BENCH_CACHE:-/tmp/commit0-cache}"
 case "$LIB" in
   tinydb) TESTS=tests ;;
   voluptuous) TESTS=voluptuous/tests ;;
+  bitstring|marshmallow|imapclient) TESTS=tests ;;
   *) echo "unknown lib $LIB" >&2; exit 2 ;;
 esac
 mkdir -p "$CACHE"

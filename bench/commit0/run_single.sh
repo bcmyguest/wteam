@@ -1,10 +1,12 @@
 #!/bin/sh
 # Baseline: ONE headless Claude Code session rebuilds the whole library.
+# Run outputs go to <work dir>.logs, outside the repo.
 #   sh run_single.sh <lib> <work dir> <model>
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 LIB="$1"; DIR="$2"; MODEL="$3"
 sh "$HERE/prepare.sh" "$LIB" "$DIR" >/dev/null
+LOGS="${DIR%/}.logs"; rm -rf "$LOGS"; mkdir -p "$LOGS"
 cd "$DIR"
 . "$HERE/goal.sh"
 start=$(date +%s)
@@ -14,10 +16,10 @@ timeout 7200 claude -p "$GOAL Work until every stub is implemented, then report 
   --permission-mode dontAsk \
   --allowedTools "Read" "Edit" "Write" "Glob" "Grep" \
     "Bash(python3 *)" "Bash(pytest *)" "Bash(ls *)" "Bash(cat *)" "Bash(mkdir *)" \
-  > result.json 2> stderr.log
+  > "$LOGS/result.json" 2> "$LOGS/stderr.log"
 end=$(date +%s)
-echo "wall_seconds $((end - start))" > metrics.txt
-python3 - "$DIR/result.json" >> metrics.txt <<'PY'
+echo "wall_seconds $((end - start))" > "$LOGS/metrics.txt"
+python3 - "$LOGS/result.json" >> "$LOGS/metrics.txt" <<'PY'
 import json, sys
 try:
     r = json.load(open(sys.argv[1]))
@@ -32,6 +34,8 @@ print("permission_denials", len(r.get("permission_denials") or []))
 print("input_tokens", u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) + u.get("cache_creation_input_tokens", 0))
 print("output_tokens", u.get("output_tokens"))
 PY
-sh "$HERE/grade.sh" "$LIB" "$DIR" > grade.txt
-tail -1 grade.txt >> metrics.txt
-cat metrics.txt
+sh "$HERE/grade.sh" "$LIB" "$DIR" > "$LOGS/grade.txt"
+tail -1 "$LOGS/grade.txt" >> "$LOGS/metrics.txt"
+sh "$HERE/audit.sh" "$LOGS" > "$LOGS/audit.txt"
+head -1 "$LOGS/audit.txt" >> "$LOGS/metrics.txt"
+cat "$LOGS/metrics.txt"
