@@ -1,0 +1,73 @@
+---
+title: CLI and files
+description: Subcommands, team.dot attributes, agent and profile TOML.
+---
+
+Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
+`wteam <command> --help` for the full list of flags.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `init` | Create `.wteam/` and an effort directory |
+| `pickup` | Import planning material and verify it (`--from <dir>`) |
+| `status` | Tickets, agents and pending events |
+| `ready` | Tickets whose blockers are done |
+| `dispatch <ticket>` | Assign a ticket to a worker (`--pair <n>`) |
+| `submit <ticket>` | Hand a finished round to review (`--summary <text>`) |
+| `verdict <ticket> pass\|fail` | Record a verdict (`--finding`, `--note`, `--follow-up`) |
+| `block <ticket>` | Mark a ticket blocked (`--reason <text>`) |
+| `requeue <ticket>` | Return a blocked ticket to todo (`--note <text>`) |
+| `approve <ticket>` | Pass a human gate. In progress. |
+| `send <to> <message>` | Message another agent |
+| `inbox` | Read mail (`--all` for the whole mailbox) |
+| `wait` | Block until orchestrator events arrive (`--timeout <secs>`) |
+| `run` | Drive the team. In progress. |
+| `stop` / `restore` | Stop a run, restore backed-up files |
+| `report` | Print the stop report |
+| `graph` | Team or work graph as Mermaid (`--work`, `--team <name>`) |
+| `permissions` | Profile translation matrix (`--profile`, `--cli`) |
+| `config promote\|list\|show` | Saved teams under `~/.config/wteam`. In progress. |
+| `setup` | Detect herdr and pick a transport. In progress. |
+
+## Team graph attributes
+
+| Attribute | Where | Meaning |
+|---|---|---|
+| `max_visits` | graph | Review rounds before a ticket is blocked. Default 3. |
+| `handoff_tokens` | graph | Context size that triggers an orchestrator handoff. |
+| `agent` | node | Agent definition name |
+| `count` | node | Instances; `$pairs` takes the `--pairs` value. Default 1. |
+| `profile` | node | Overrides the agent's permission profile |
+| `prompt` | node | Overrides the agent's role prompt |
+| `shape` | node | `box` agent, `parallelogram` command, `hexagon` human gate |
+| `script` | command node | Script run from the repo root |
+| `on` | edge | Event: `dispatch`, `submit`, `pass`, `fail`, `blocked`, `message` |
+| `kind` | edge | `pair`, `broadcast` or `fan-in`. Default `pair`. |
+
+## Agent TOML
+
+Optional. Resolved from `.wteam/agents/<name>.toml`, then
+`$WTEAM_CONFIG_DIR/agents/<name>.toml`, then the built-ins.
+
+```toml
+name = "worker"
+cli = "claude"       # claude | codex | opencode | fake (cursor: in progress)
+model = "sonnet"
+prompt = "worker"
+profile = "edit"
+extra_args = []      # passed through to the CLI
+```
+
+## Profile TOML
+
+Optional. Resolved from `.wteam/profiles/<name>.toml`. Rules use Claude syntax
+(see [Permissions](../permissions/)).
+
+## Files under `.wteam/<slug>/`
+
+`spec.md`, `tickets/NN-name.md`, `state.json`, `mail/<agent>.md`,
+`reviews/NN.md`, `queue.md`, `handoffs/`, `logs/<agent>-<turn>.log`,
+`backup/` and `worktrees/pair<N>/`. The full layout is in the repository's
+`architecture.md`.

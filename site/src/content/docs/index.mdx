@@ -1,0 +1,28 @@
+---
+title: wteam
+description: Portable worker/reviewer teams for coding agents
+template: splash
+hero:
+  title: wteam
+  tagline: Worker/reviewer teams for coding agents, driven from one repo and one CLI.
+  actions:
+    - text: Quickstart
+      link: ./quickstart/
+      icon: right-arrow
+    - text: Concepts
+      link: ./concepts/
+      variant: minimal
+---
+
+wteam turns a set of planned tickets into work done by pairs of agents. Each
+worker implements one ticket. A reviewer checks the result against the ticket
+and either passes it or sends it back. The orchestrator dispatches tickets and
+the reviewer's verdicts decide what commits.
+
+Agents talk through append-only mailboxes in `.wteam/`. The CLI works the same
+for Claude Code, Codex, opencode and Cursor. Each CLI maps the permission
+profiles differently; see [Permissions](./permissions/).
+
+:::note[Demo]
+Demo GIF: pending. It needs `vhs` to render `site/demo.tape`, which is not installed.
+:::

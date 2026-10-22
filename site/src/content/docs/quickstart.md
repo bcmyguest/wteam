@@ -1,0 +1,79 @@
+---
+title: Quickstart
+description: Initialise an effort, check its tickets and drive one ticket through review.
+---
+
+Requirements: a git repository, and Rust for a source build.
+
+## Install
+
+```bash
+cargo install wteam --locked
+```
+
+Or build from a checkout:
+
+```bash
+git clone https://github.com/bcmyguest/wteam
+cd wteam
+cargo build --release   # binary at target/release/wteam
+```
+
+## Create an effort
+
+An effort is a directory under `.wteam/` that holds a spec, tickets, mailboxes
+and state. Create `.wteam/` and an effort directory:
+
+```bash
+wteam init
+```
+
+Import the planning output (a `.scratch/<slug>` directory from `/to-tickets`)
+and verify it:
+
+```bash
+wteam pickup --from .scratch/my-effort
+```
+
+Without `--from`, `pickup` verifies `.wteam/<slug>` in place.
+
+## Inspect the work
+
+```bash
+wteam status          # tickets, agents and pending events
+wteam ready           # tickets whose blockers are done
+wteam graph           # team graph as Mermaid
+wteam graph --work    # work graph as Mermaid
+```
+
+Every command accepts `--json` for machine-readable output.
+
+## Move one ticket through review
+
+The orchestrator dispatches a ready ticket to a worker pair:
+
+```bash
+wteam dispatch 01 --pair 1
+```
+
+The worker reports a finished round, or a blocker:
+
+```bash
+wteam submit 01 --summary "Added the parser and its tests"
+wteam block 01 --reason "Upstream API missing"
+```
+
+The reviewer records the verdict. A `fail` needs at least one `--finding`:
+
+```bash
+wteam verdict 01 pass --note "Consider a shorter name"
+wteam verdict 01 fail --finding "Parser ignores CRLF"
+```
+
+Agents read their mail with `wteam inbox` and message each other with
+`wteam send <agent> "<text>"`.
+
+:::caution[Status: in progress]
+`wteam run` (the watcher that drives the whole team), `wteam approve` and the
+human gates are not implemented yet. Drive tickets by hand as above until they land.
+:::

@@ -1,0 +1,22 @@
+{
+  "name": "wteam-site",
+  "version": "0.0.0",
+  "description": "Documentation site for wteam (Astro + Starlight default theme).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "vendor": "node scripts/vendor-mermaid.mjs",
+    "dev": "node scripts/vendor-mermaid.mjs && astro dev",
+    "build": "node scripts/vendor-mermaid.mjs && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.42.6",
+    "astro": "^7.3.8",
+    "mermaid": "^11.12.0"
+  },
+  "packageManager": "pnpm@11.28.6",
+  "engines": {
+    "node": ">=22"
+  }
+}
