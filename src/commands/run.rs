@@ -19,6 +19,12 @@ pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
         "none" | "worktree" => {}
         other => bail!("unknown isolation `{other}` (expected none or worktree)"),
     }
+    match a.overlap.as_str() {
+        "serial" => {}
+        "allow" if isolation == "worktree" => {}
+        "allow" => bail!("--overlap allow needs --isolation worktree (run uses none)"),
+        other => bail!("unknown overlap `{other}` (expected serial or allow)"),
+    }
     let transport = match &a.transport {
         Some(t) => t.clone(),
         None => crate::config::user_transport()?.unwrap_or_else(|| "resume".to_string()),
@@ -43,6 +49,7 @@ pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
             watcher_pid: Some(std::process::id()),
             dispatch: a.dispatch.name().to_string(),
             replan: a.replan,
+            overlap: a.overlap.clone(),
         };
         Ok(())
     })?;

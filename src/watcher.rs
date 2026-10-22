@@ -365,7 +365,8 @@ fn run_orchestrator_turn(ctx: &Ctx, prompt: &str) -> Result<String> {
     )
 }
 
-/// Ready tickets that could start now: no file overlap with a ticket in progress.
+/// Ready tickets that could start now: no file overlap with a ticket in progress, unless the run
+/// allows overlap.
 fn dispatchable_ready(ctx: &Ctx) -> Result<Vec<String>> {
     let tickets = work::load_tickets(&ctx.paths.tickets_dir())?;
     let s = state::load(&ctx.paths)?;
@@ -379,7 +380,9 @@ fn dispatchable_ready(ctx: &Ctx) -> Result<Vec<String>> {
         .collect();
     Ok(work::ready(&tickets, &s)
         .into_iter()
-        .filter(|r| !in_progress.iter().any(|p| work::files_overlap(p, r)))
+        .filter(|r| {
+            s.run.allows_overlap() || !in_progress.iter().any(|p| work::files_overlap(p, r))
+        })
         .map(|r| r.id.clone())
         .collect())
 }

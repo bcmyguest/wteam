@@ -319,7 +319,7 @@ pub fn ready<'a>(tickets: &'a [Ticket], state: &State) -> Vec<&'a Ticket> {
 }
 
 /// Ids of the ready tickets `dispatch` would accept now: a pair is free (neither busy nor
-/// dirty), and the ticket's `files` overlap no ticket in progress.
+/// dirty), and the ticket's `files` overlap no ticket in progress (unless the run allows overlap).
 pub fn dispatchable(tickets: &[Ticket], state: &State, dirty: &[u32]) -> Vec<String> {
     let busy_pairs: Vec<u32> = state
         .tickets
@@ -341,7 +341,11 @@ pub fn dispatchable(tickets: &[Ticket], state: &State, dirty: &[u32]) -> Vec<Str
         .collect();
     ready(tickets, state)
         .into_iter()
-        .filter(|t| free_pair && in_progress.iter().all(|other| !files_overlap(t, other)))
+        .filter(|t| {
+            free_pair
+                && (state.run.allows_overlap()
+                    || in_progress.iter().all(|other| !files_overlap(t, other)))
+        })
         .map(|t| t.id.clone())
         .collect()
 }
@@ -392,6 +396,9 @@ pub struct Width {
     pub longest_chain: usize,
     /// Most tickets ready at once while tickets land one by one in id order.
     pub max_parallel: usize,
+    /// `max_parallel` with tickets that share a `files` path counted as one slot: what
+    /// `--overlap serial` dispatch can run at once.
+    pub max_parallel_serial: usize,
 }
 
 /// Depth of `id` in blocker chains: its own ticket plus its deepest blocker.
@@ -420,8 +427,26 @@ fn chain_depth<'a>(
     deepest + 1
 }
 
+/// True when both tickets list `Files:` and those globs could touch the same path. Unlike
+/// `files_overlap`, a ticket with no `Files:` shares no path with anything.
+fn shares_path(a: &Ticket, b: &Ticket) -> bool {
+    !a.files.is_empty() && !b.files.is_empty() && files_overlap(a, b)
+}
+
+/// Most tickets from `ready` (in order) that pairwise share no `Files:` path, picked greedily.
+fn disjoint_count(ready: &[&Ticket]) -> usize {
+    let mut picked: Vec<&Ticket> = Vec::new();
+    for t in ready {
+        if picked.iter().all(|p| !shares_path(t, p)) {
+            picked.push(t);
+        }
+    }
+    picked.len()
+}
+
 /// Longest blocker chain, and the most tickets ready at once when tickets land
-/// one by one (the lowest ready id first). Duplicate ids count once.
+/// one by one (the lowest ready id first), with and without `files` overlap counted.
+/// Duplicate ids count once.
 pub fn width(tickets: &[Ticket]) -> Width {
     let mut by_id: BTreeMap<&str, &Ticket> = BTreeMap::new();
     for t in tickets {
@@ -436,22 +461,26 @@ pub fn width(tickets: &[Ticket]) -> Width {
 
     let mut landed: BTreeSet<&str> = BTreeSet::new();
     let mut max_parallel = 0;
+    let mut max_parallel_serial = 0;
     loop {
-        let mut ready: Vec<&str> = by_id
-            .iter()
-            .filter(|(id, t)| {
-                !landed.contains(*id) && t.blocked_by.iter().all(|b| landed.contains(b.as_str()))
+        let mut ready: Vec<&Ticket> = by_id
+            .values()
+            .copied()
+            .filter(|t| {
+                !landed.contains(t.id.as_str())
+                    && t.blocked_by.iter().all(|b| landed.contains(b.as_str()))
             })
-            .map(|(id, _)| *id)
             .collect();
-        ready.sort_by(|a, b| id_cmp(a, b));
+        ready.sort_by(|a, b| id_cmp(&a.id, &b.id));
         max_parallel = max_parallel.max(ready.len());
+        max_parallel_serial = max_parallel_serial.max(disjoint_count(&ready));
         let Some(&next) = ready.first() else { break };
-        landed.insert(next);
+        landed.insert(next.id.as_str());
     }
     Width {
         longest_chain,
         max_parallel,
+        max_parallel_serial,
     }
 }
 
@@ -608,7 +637,8 @@ mod tests {
             width(&ts),
             Width {
                 longest_chain: 3,
-                max_parallel: 1
+                max_parallel: 1,
+                max_parallel_serial: 1,
             }
         );
     }
@@ -621,7 +651,8 @@ mod tests {
             width(&ts),
             Width {
                 longest_chain: 2,
-                max_parallel: 6
+                max_parallel: 6,
+                max_parallel_serial: 6,
             }
         );
     }
@@ -633,11 +664,56 @@ mod tests {
             width(&unknown),
             Width {
                 longest_chain: 1,
-                max_parallel: 0
+                max_parallel: 0,
+                max_parallel_serial: 0,
             }
         );
         let cycle = [t("02", &["03"], &[]), t("03", &["02"], &[])];
         assert_eq!(width(&cycle).max_parallel, 0);
+    }
+
+    #[test]
+    fn serial_width_counts_shared_files_as_one_slot() {
+        let shared = [
+            t("01", &[], &["src/a.rs"]),
+            t("02", &[], &["src/a.rs"]),
+            t("03", &[], &["src/a.rs"]),
+            t("04", &[], &["src/a.rs"]),
+        ];
+        assert_eq!(
+            width(&shared),
+            Width {
+                longest_chain: 1,
+                max_parallel: 4,
+                max_parallel_serial: 1,
+            }
+        );
+        let unlisted = [t("01", &[], &[]), t("02", &[], &[]), t("03", &[], &[])];
+        assert_eq!(width(&unlisted).max_parallel_serial, 3);
+        let mixed = [
+            t("01", &[], &["src/a.rs"]),
+            t("02", &[], &["src/b.rs"]),
+            t("03", &[], &["src/a.rs"]),
+        ];
+        assert_eq!(width(&mixed).max_parallel_serial, 2);
+    }
+
+    #[test]
+    fn overlap_allow_lets_shared_file_tickets_dispatch_together() {
+        let ts = [t("01", &[], &["src/a.rs"]), t("02", &[], &["src/a.rs"])];
+        let mut st = State::new("demo");
+        st.run.pairs = 2;
+        st.tickets.insert(
+            "01".into(),
+            crate::state::TicketState {
+                status: TicketStatus::Doing,
+                pair: Some(1),
+                ..Default::default()
+            },
+        );
+        assert_eq!(dispatchable(&ts, &st, &[]), Vec::<String>::new());
+        st.run.overlap = "allow".into();
+        assert_eq!(dispatchable(&ts, &st, &[]), vec!["02".to_string()]);
     }
 
     #[test]

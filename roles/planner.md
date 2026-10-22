@@ -54,6 +54,7 @@ A ticket gets two re-plans. If it blocks after the second, it stays blocked for 
 - Every ticket carries a `**Context:**` section after `Files:`. It maps the code the ticket touches: for each symbol the ticket's code calls, implements or must match, one line `path:line  signature  — one-phrase role`, with no bodies. Include the shared types and registries the ticket plugs into. Keep it under 40 lines: a map, not a copy.
 - Draw a `Blocked by:` edge only when a ticket needs code another ticket writes. Sibling modules that call each other through stable signatures need no edge: they run in parallel and integrate at review.
 - Shared `Files:` need no edge either: dispatch runs overlapping tickets one at a time.
+- Under `serial` dispatch, tickets that should run at once must not share a `Files:` path. When most work sits in one file, either split it into sibling tickets and note in the spec that the run needs `--overlap allow`, or accept the serial chain.
 - Fan out after the tracer. The tracer builds the shared skeleton (package importable, shared types, registries) end to end, so that right after it lands at least `pairs` tickets are ready, when the work allows. `wteam pickup` prints `max_parallel`; a width warning means the graph is too serial.
 - Each acceptance criterion names behaviour a test observes.
 - Follow-ups in `queue.md` arrive as `[key] NN: text`. Rule of three: wait for the third sighting of one key before turning it into a ticket.

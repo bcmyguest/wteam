@@ -203,10 +203,25 @@ pub struct RunSettings {
     /// `wteam run --replan`: under `auto`, the planner rewrites each blocked ticket once.
     #[serde(default)]
     pub replan: bool,
+    /// `serial` or `allow` (`wteam run --overlap`). Under `serial` a ticket whose `Files:`
+    /// overlap a ticket in progress waits; under `allow` it runs at once (worktree isolation).
+    #[serde(default = "serial_overlap")]
+    pub overlap: String,
 }
 
 fn model_dispatch() -> String {
     "model".into()
+}
+
+fn serial_overlap() -> String {
+    "serial".into()
+}
+
+impl RunSettings {
+    /// True when tickets whose `Files:` overlap may run at once (`--overlap allow`).
+    pub fn allows_overlap(&self) -> bool {
+        self.overlap == "allow"
+    }
 }
 
 impl Default for RunSettings {
@@ -221,6 +236,7 @@ impl Default for RunSettings {
             watcher_pid: None,
             dispatch: model_dispatch(),
             replan: false,
+            overlap: serial_overlap(),
         }
     }
 }

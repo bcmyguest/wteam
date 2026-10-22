@@ -45,6 +45,7 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `--budget-tokens <n>` | none | Stop new work once summed agent context tokens exceed `n` |
 | `--replan` | off | Under `auto`: each blocked ticket gets up to two planner turns to rewrite it and requeue it. A ticket blocked after its second re-plan stays blocked |
 | `--isolation <none\|worktree>` | `none` | `worktree` is not available yet |
+| `--overlap <serial\|allow>` | `serial` | `serial`: a ticket whose `Files:` overlap a ticket in progress waits. `allow`: it runs at once; a landing conflict returns to its worker. Needs worktree isolation |
 
 ## Team graph attributes
 

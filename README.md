@@ -98,6 +98,9 @@ wteam run --pairs 2 --budget-tokens 2000000 --max-turns 200
 
 - `--budget-tokens` stops new work once the agents' summed context tokens exceed
   the budget. In-flight turns finish first.
+- `--overlap allow` runs tickets whose `Files:` overlap at the same time, each on its
+  own pair. It needs worktree isolation. A landing conflict returns to its worker with
+  conflict markers. The default `serial` runs such tickets one at a time.
 - `--dispatch auto|model` picks who dispatches (default `auto`). `model` also
   spends an orchestrator turn on every dispatch.
 - `--replan` (auto only, default off) gives each blocked ticket up to two planner turns. The

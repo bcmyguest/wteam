@@ -409,6 +409,28 @@ fn eight_ticket_chain_warns_but_passes() {
 }
 
 #[test]
+fn ready_tickets_sharing_a_file_warn_to_allow_overlap() {
+    let r = Repo::new("demo");
+    for i in 1..=4 {
+        r.write(
+            &format!(".wteam/demo/tickets/{i:02}-step-{i:02}.md"),
+            &format!(
+                "# {i:02}: Step {i:02}\n\n**What to build:** Step {i:02}.\n\n**Blocked by:** None (can start immediately)\n\n**Files:** src/shared.rs\n\n**Context:**\n`src/shared.rs:1`  `fn a()`  — stub\n\n- [ ] it works\n"
+            ),
+        );
+    }
+    let v = json_pickup(&r, &[]);
+    assert_eq!(v["problems"], serde_json::json!([]));
+    assert_eq!(v["max_parallel"], 4);
+    assert_eq!(v["max_parallel_serial"], 1);
+    let warnings = v["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    let text = warnings[0].as_str().unwrap();
+    assert!(text.contains("--overlap allow"), "{text}");
+    assert!(text.contains("max_parallel_serial 1"), "{text}");
+}
+
+#[test]
 fn tracer_with_six_fan_out_tickets_has_no_warning() {
     let r = Repo::new("demo");
     graph(&r, 7, false);

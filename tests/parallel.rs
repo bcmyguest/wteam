@@ -85,6 +85,11 @@ wteam submit "$id" --summary "edited $id" --extra src/shared.txt
 
 /// Worktree isolation with `pairs` pairs and the default team; the orchestrator never dispatches.
 fn repo_with_pairs(pairs: u32) -> Repo {
+    repo_with_overlap(pairs, "serial")
+}
+
+/// Like `repo_with_pairs`, with the run's `--overlap` mode set to `overlap`.
+fn repo_with_overlap(pairs: u32, overlap: &str) -> Repo {
     let r = Repo::new("demo");
     r.use_fake_agents();
     r.agent_script("orchestrator", "echo ok\n");
@@ -93,7 +98,7 @@ fn repo_with_pairs(pairs: u32) -> Repo {
         ".wteam/demo/state.json",
         &format!(
             r#"{{"slug":"demo","run":{{"pairs":{pairs},"isolation":"worktree",
-                "transport":"resume","team":"default"}}}}"#
+                "transport":"resume","team":"default","overlap":"{overlap}"}}}}"#
         ),
     );
     r.agent_script("worker", WORKER);
@@ -1197,4 +1202,47 @@ fn mail_failure_after_reservation_rolls_the_ticket_back() {
     assert_ne!(s["tickets"]["01"]["status"], "doing");
     assert!(s["tickets"]["01"]["assignee"].is_null(), "{s:#}");
     assert_eq!(s["tickets"]["01"]["pair"], serde_json::Value::Null);
+}
+
+#[test]
+fn overlap_allow_runs_shared_file_tickets_at_once_and_conflict_lands_second() {
+    let r = repo_with_overlap(2, "allow");
+    r.agent_script("worker", SHARED_WORKER);
+    r.ticket("01", "Add one", "None", "src/shared.txt", "");
+    r.ticket("02", "Add two", "None", "src/shared.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wteam().args(["dispatch", "02"]).assert().success();
+
+    // Both workers park on their gates, so both being in progress proves they run at once.
+    let s = r.wait_for(60, |s| {
+        s["tickets"]["01"]["status"] == "doing" && s["tickets"]["02"]["status"] == "doing"
+    });
+    assert_eq!(s["tickets"]["01"]["pair"], 1);
+    assert_eq!(s["tickets"]["02"]["pair"], 2);
+    go(&r);
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+
+    release_02(&r);
+    r.wait_for(60, |s| {
+        s["tickets"]["02"]["status"] == "doing" && s["tickets"]["02"]["land_conflicts"] == 1
+    });
+    release_resolve(&r);
+    r.wait_for(60, |s| s["tickets"]["02"]["status"] == "done");
+    assert_eq!(r.read("src/shared.txt"), "01\n02\n");
+}
+
+#[test]
+fn overlap_allow_needs_worktree_isolation_and_a_known_mode() {
+    let r = Repo::new("demo");
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam()
+        .args(["run", "--overlap", "allow"])
+        .assert()
+        .failure()
+        .stderr(contains("--overlap allow needs --isolation worktree"));
+    r.wteam()
+        .args(["run", "--overlap", "bogus"])
+        .assert()
+        .failure()
+        .stderr(contains("unknown overlap `bogus`"));
 }

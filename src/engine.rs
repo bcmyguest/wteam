@@ -782,6 +782,7 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
                 busy_pairs.extend(ts.pair);
             }
             if let Some(other) = all.iter().find(|o| &o.id == id)
+                && !s.run.allows_overlap()
                 && work::files_overlap(&t, other)
             {
                 bail!(

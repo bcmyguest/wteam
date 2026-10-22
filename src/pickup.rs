@@ -27,20 +27,31 @@ pub struct PickupReport {
     pub longest_chain: usize,
     /// Most tickets ready at once.
     pub max_parallel: usize,
+    /// Most tickets ready at once that `--overlap serial` dispatch can run (shared `Files:` count once).
+    pub max_parallel_serial: usize,
     /// Mermaid work graph.
     pub graph: String,
 }
 
-/// One warning when the longest chain covers more than half of a graph of 4+ tickets.
+/// Width warnings: a long chain (for graphs of 4+ tickets, when it covers over half of them),
+/// and ready tickets that only `--overlap allow` runs together. Both use the serial width.
 fn width_warnings(tickets: usize, w: work::Width) -> Vec<String> {
-    if tickets < WIDTH_WARN_MIN_TICKETS || w.longest_chain * 2 <= tickets {
-        return Vec::new();
+    let mut out = Vec::new();
+    if tickets >= WIDTH_WARN_MIN_TICKETS && w.longest_chain * 2 > tickets {
+        out.push(format!(
+            "longest chain covers {} of {tickets} tickets (longest_chain {}, max_parallel {}): \
+             drop blocking edges that need no code from another ticket",
+            w.longest_chain, w.longest_chain, w.max_parallel_serial
+        ));
     }
-    vec![format!(
-        "longest chain covers {} of {tickets} tickets (longest_chain {}, max_parallel {}): \
-         drop blocking edges that need no code from another ticket",
-        w.longest_chain, w.longest_chain, w.max_parallel
-    )]
+    if w.max_parallel_serial < w.max_parallel {
+        out.push(format!(
+            "max_parallel {} but max_parallel_serial {}: ready tickets that share Files: run one \
+             at a time under `--overlap serial`; `--overlap allow` would parallelise them",
+            w.max_parallel, w.max_parallel_serial
+        ));
+    }
+    out
 }
 
 /// One warning per ticket whose body has no `**Context:**` section.
@@ -86,6 +97,7 @@ pub fn pickup(paths: &Paths, from: Option<&Path>) -> Result<PickupReport> {
         warnings,
         longest_chain: width.longest_chain,
         max_parallel: width.max_parallel,
+        max_parallel_serial: width.max_parallel_serial,
         graph: render::work_mermaid(&tickets, &st),
     })
 }

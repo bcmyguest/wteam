@@ -177,6 +177,11 @@ fn reviewer_names_its_commands() {
 }
 
 #[test]
+fn planner_keeps_shared_files_off_serial_parallel_work() {
+    assert_mentions("planner", &["--overlap allow", "share a `Files:` path"]);
+}
+
+#[test]
 fn planner_requires_context_section() {
     assert_mentions(
         "planner",

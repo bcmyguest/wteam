@@ -234,6 +234,10 @@ pub struct RunArgs {
     /// Under `auto`: give each blocked ticket one planner turn to rewrite it, then requeue it.
     #[arg(long)]
     pub replan: bool,
+    /// `serial`: tickets whose `Files:` overlap run one at a time. `allow`: they run at once
+    /// (needs worktree isolation); a landing conflict goes back to its worker.
+    #[arg(long, default_value = "serial")]
+    pub overlap: String,
 }
 
 /// Who dispatches ready tickets during `wteam run`.
