@@ -363,12 +363,13 @@ pub fn one_turn(
     };
     let def = agents::load(&agent_name, &search)?;
     let adapter = adapters::for_cli(&def.cli)?;
+    let cwd = turn_dir(ctx, agent)?;
     let permissions = if def.cli == "fake" {
         Default::default()
     } else {
         let profile =
             crate::permissions::load(def.profile.as_deref().unwrap_or("edit"), &dirs.profiles)?;
-        let t = crate::permissions::translate(&def.cli, &profile, &role)?;
+        let t = crate::permissions::translate_in(&def.cli, &profile, &role, &cwd)?;
         apply_files(&ctx.paths, &t)?;
         t
     };
@@ -386,7 +387,7 @@ pub fn one_turn(
         session_id: session.clone(),
         prompt: prompt.to_string(),
         role_prompt,
-        cwd: turn_dir(ctx, agent)?,
+        cwd: cwd.clone(),
         env: vec![
             ("WTEAM_ROOT".into(), ctx.paths.root.display().to_string()),
             ("WTEAM_SLUG".into(), ctx.paths.slug.clone()),

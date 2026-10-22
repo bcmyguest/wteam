@@ -1,11 +1,22 @@
 //! Translate a profile for claude: `--settings <json>` plus a permission mode.
 
+use std::path::Path;
+
 use anyhow::Result;
 use serde_json::json;
 
-use super::{Profile, RuleSupport, Support, Translation, rules_of};
+use super::{Profile, Rule, RuleSupport, Support, Translation, parse_rule, rules_of};
 
+/// Translate `profile` with path-scoped rules relative (the `wteam permissions` preview form).
 pub fn translate(profile: &Profile, role: &str) -> Result<Translation> {
+    translate_in(profile, role, None)
+}
+
+/// Translate `profile`. With `dir`, each relative path-scoped `allow` and `ask` rule is anchored
+/// under `dir` in Claude's absolute form (`//<dir>/<pattern>`), so it holds after the agent `cd`s.
+/// A relative path-scoped `deny` rule keeps its original form and gains the anchored one; `**`
+/// and absolute rules stay as written. The support rows keep the profile's rule text.
+pub fn translate_in(profile: &Profile, role: &str, dir: Option<&Path>) -> Result<Translation> {
     let _ = role;
     let rules = rules_of(profile)?;
     let support = rules
@@ -25,9 +36,9 @@ pub fn translate(profile: &Profile, role: &str) -> Result<Translation> {
     }
     let settings = json!({
         "permissions": {
-            "allow": profile.allow,
-            "ask": profile.ask,
-            "deny": profile.deny,
+            "allow": anchored(&profile.allow, dir, false)?,
+            "ask": anchored(&profile.ask, dir, false)?,
+            "deny": anchored(&profile.deny, dir, true)?,
         }
     });
     Ok(Translation {
@@ -40,6 +51,42 @@ pub fn translate(profile: &Profile, role: &str) -> Result<Translation> {
         support,
         ..Translation::default()
     })
+}
+
+/// One list of a profile in emitted order. With `dir`, a relative path-scoped rule is replaced by
+/// its anchored form. In a deny list the original stays too: a deny that only matches under `dir`
+/// must not weaken the original. Every other rule passes through unchanged.
+fn anchored(list: &[String], dir: Option<&Path>, deny: bool) -> Result<Vec<String>> {
+    let mut out = Vec::with_capacity(list.len());
+    for rule in list {
+        match dir.map(|d| anchor(rule, d)).transpose()?.flatten() {
+            Some(anchored) => {
+                if deny {
+                    out.push(rule.clone());
+                }
+                out.push(anchored);
+            }
+            None => out.push(rule.clone()),
+        }
+    }
+    Ok(out)
+}
+
+/// The anchored form of a relative `Read(<pattern>)` or `Edit(<pattern>)` under `dir`, or `None`
+/// for any rule that stays as written.
+fn anchor(rule: &str, dir: &Path) -> Result<Option<String>> {
+    let base = dir.to_string_lossy();
+    let under = |p: &str| format!("//{}/{p}", base.trim_matches('/'));
+    Ok(match parse_rule(rule)? {
+        Rule::Edit(p) if is_relative(&p) => Some(format!("Edit({})", under(&p))),
+        Rule::Read(p) if is_relative(&p) => Some(format!("Read({})", under(&p))),
+        _ => None,
+    })
+}
+
+/// Relative and path-scoped: not `**`-prefixed (matches anywhere) and not absolute.
+fn is_relative(pattern: &str) -> bool {
+    !pattern.starts_with("**") && !pattern.starts_with('/')
 }
 
 #[cfg(test)]
@@ -104,5 +151,134 @@ mod tests {
         );
         assert!(t.support.iter().all(|s| s.support == Support::Exact));
         assert!(!t.args[1].contains("Edit(**)"));
+    }
+
+    fn settings_of(t: &Translation) -> serde_json::Value {
+        serde_json::from_str::<serde_json::Value>(&t.args[1]).unwrap()["permissions"].clone()
+    }
+
+    #[test]
+    fn planner_edit_rule_anchors_under_repo_root() {
+        let t = translate_in(
+            &builtin("plan").unwrap(),
+            "planner",
+            Some(Path::new("/tmp/repo")),
+        )
+        .unwrap();
+        let allow = &settings_of(&t)["allow"];
+        assert!(
+            allow
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r == "Edit(//tmp/repo/.wteam/**)")
+        );
+        assert!(
+            !allow
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r == "Edit(.wteam/**)")
+        );
+        assert!(allow.as_array().unwrap().iter().any(|r| r == "Read(**)"));
+        // Preview rows keep the profile's relative text.
+        assert!(t.support.iter().any(|s| s.rule == "Edit(.wteam/**)"));
+    }
+
+    #[test]
+    fn reviewer_scratch_rule_anchors_under_pair_worktree() {
+        let dir = Path::new("/home/b/wt/pair1");
+        let t = translate_in(&builtin("review").unwrap(), "reviewer", Some(dir)).unwrap();
+        let allow = settings_of(&t)["allow"].clone();
+        assert!(
+            allow
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r == "Edit(//home/b/wt/pair1/scratch/**)")
+        );
+        assert!(
+            !allow
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r == "Edit(scratch/**)")
+        );
+    }
+
+    #[test]
+    fn unscoped_and_absolute_rules_stay_put() {
+        let p = Profile {
+            name: "t".into(),
+            allow: vec![
+                "Read(**)".into(),
+                "Edit(**)".into(),
+                "Edit(//etc/x/**)".into(),
+                "Bash(git diff *)".into(),
+                "Edit(scratch/**)".into(),
+            ],
+            ask: vec![],
+            deny: vec!["Read(**/.env)".into()],
+            bypass: false,
+        };
+        let t = translate_in(&p, "worker", Some(Path::new("/tmp/repo"))).unwrap();
+        let s = settings_of(&t);
+        assert_eq!(
+            s["allow"],
+            json!([
+                "Read(**)",
+                "Edit(**)",
+                "Edit(//etc/x/**)",
+                "Bash(git diff *)",
+                "Edit(//tmp/repo/scratch/**)"
+            ])
+        );
+        // Deny stays as written: anchoring it would leave `.env` files outside the dir readable.
+        assert_eq!(s["deny"], json!(["Read(**/.env)"]));
+    }
+
+    #[test]
+    fn no_dir_keeps_relative_rules() {
+        let t = translate(&builtin("plan").unwrap(), "planner").unwrap();
+        assert!(t.args[1].contains("Edit(.wteam/**)"));
+    }
+
+    #[test]
+    fn relative_deny_is_emitted_in_both_forms() {
+        let p = Profile {
+            name: "t".into(),
+            allow: vec![],
+            ask: vec![],
+            deny: vec!["Edit(secrets/**)".into(), "Read(**/.env)".into()],
+            bypass: false,
+        };
+        let t = translate_in(&p, "worker", Some(Path::new("/tmp/repo"))).unwrap();
+        assert_eq!(
+            settings_of(&t)["deny"],
+            json!([
+                "Edit(secrets/**)",
+                "Edit(//tmp/repo/secrets/**)",
+                "Read(**/.env)"
+            ])
+        );
+    }
+
+    #[test]
+    fn trailing_slash_on_dir_anchors_once() {
+        let t = translate_in(
+            &builtin("plan").unwrap(),
+            "planner",
+            Some(Path::new("/tmp/repo/")),
+        )
+        .unwrap();
+        let allow = settings_of(&t)["allow"].clone();
+        assert!(
+            allow
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r == "Edit(//tmp/repo/.wteam/**)")
+        );
+        assert!(!t.args[1].contains("//tmp/repo//"));
     }
 }

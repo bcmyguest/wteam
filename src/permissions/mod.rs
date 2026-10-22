@@ -19,7 +19,7 @@ pub mod cursor;
 pub mod opencode;
 pub mod pi;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -344,6 +344,15 @@ pub fn translate(cli: &str, profile: &Profile, role: &str) -> Result<Translation
     }
 }
 
+/// Translate `profile` for `cli` as it runs in `dir`. Claude anchors its path-scoped rules there;
+/// every other CLI translates as in [`translate`].
+pub fn translate_in(cli: &str, profile: &Profile, role: &str, dir: &Path) -> Result<Translation> {
+    match cli {
+        "claude" => claude::translate_in(profile, role, Some(dir)),
+        _ => translate(cli, profile, role),
+    }
+}
+
 /// Per-CLI support for every rule of `profile`: one `RuleSupport` per rule.
 pub fn support_matrix(profile: &Profile, clis: &[&str]) -> Result<Vec<(String, Vec<RuleSupport>)>> {
     clis.iter()
@@ -564,6 +573,25 @@ mod tests {
         assert!(t.contains("≈ deny"), "{t}");
         assert!(t.contains("✘ "), "{t}");
         assert_eq!(t.lines().count(), 5, "{t}");
+    }
+
+    #[test]
+    fn translate_in_anchors_claude_only() {
+        let plan = builtin("plan").unwrap();
+        let dir = Path::new("/tmp/repo");
+        for cli in ["codex", "opencode", "pi", "cursor"] {
+            assert_eq!(
+                translate_in(cli, &plan, "planner", dir).unwrap(),
+                translate(cli, &plan, "planner").unwrap(),
+                "{cli}"
+            );
+        }
+        let claude = translate_in("claude", &plan, "planner", dir).unwrap();
+        assert!(
+            claude.args[1].contains("//tmp/repo/.wteam/**"),
+            "{}",
+            claude.args[1]
+        );
     }
 
     #[test]

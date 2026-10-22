@@ -187,3 +187,63 @@ fn review_profile_edits_only_scratch_for_claude() {
         "{text}"
     );
 }
+
+/// A reviewer on pair 2 runs claude in that pair's worktree. The emitted settings anchor the
+/// `review` profile's `scratch/**` under the worktree, and the turn's cwd is the worktree.
+#[test]
+fn reviewer_turn_anchors_settings_in_its_pair_worktree() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let r = Repo::new("s");
+    r.write(
+        ".wteam/agents/reviewer.toml",
+        "name = \"reviewer\"\ncli = \"claude\"\nprofile = \"review\"\nprompt = \"reviewer\"\n",
+    );
+    let state = serde_json::json!({
+        "slug": "s",
+        "run": {"pairs": 2, "isolation": "worktree", "team": "default", "transport": "resume"},
+        "tickets": {"01": {"status": "review", "assignee": "reviewer.1", "pair": 2}},
+    });
+    r.write(".wteam/s/state.json", &state.to_string());
+    let pair = r.path().join(".wteam/s/worktrees/pair2");
+    std::fs::create_dir_all(&pair).unwrap();
+
+    // Fake `claude`: record its argv and cwd, then answer with a result event.
+    r.write(
+        ".wteam-bin/claude",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$WTEAM_TEST_ARGS\"\npwd -P > \"$WTEAM_TEST_CWD\"\necho '{\"type\":\"result\",\"result\":\"ok\",\"session_id\":\"s1\"}'\n",
+    );
+    let script = r.path().join(".wteam-bin/claude");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let args_file = r.path().join("args.txt");
+    let cwd_file = r.path().join("cwd.txt");
+    let path = format!(
+        "{}:{}",
+        r.path().join(".wteam-bin").display(),
+        support::path_with_wteam()
+    );
+
+    r.wteam()
+        .args(["__turn", "reviewer.1"])
+        .env("PATH", path)
+        .env("WTEAM_TEST_ARGS", &args_file)
+        .env("WTEAM_TEST_CWD", &cwd_file)
+        .output()
+        .unwrap();
+
+    let args = std::fs::read_to_string(&args_file).expect("fake claude was not run");
+    let lines: Vec<&str> = args.lines().collect();
+    let i = lines.iter().position(|l| *l == "--settings").unwrap();
+    let settings: serde_json::Value = serde_json::from_str(lines[i + 1]).unwrap();
+    let want = format!(
+        "Edit(//{}/.wteam/s/worktrees/pair2/scratch/**)",
+        r.path().display().to_string().trim_start_matches('/')
+    );
+    let allow = settings["permissions"]["allow"].as_array().unwrap();
+    assert!(allow.iter().any(|x| x == want.as_str()), "{allow:?}");
+    assert!(!allow.iter().any(|x| x == "Edit(scratch/**)"), "{allow:?}");
+    assert_eq!(
+        std::fs::read_to_string(&cwd_file).unwrap().trim(),
+        pair.canonicalize().unwrap().display().to_string()
+    );
+}
