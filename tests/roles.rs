@@ -177,6 +177,27 @@ fn reviewer_names_its_commands() {
 }
 
 #[test]
+fn planner_requires_context_section() {
+    assert_mentions(
+        "planner",
+        &["**Context:**", "path:line  signature", "under 40 lines"],
+    );
+}
+
+#[test]
+fn worker_and_reviewer_start_from_context() {
+    for name in ["worker", "reviewer"] {
+        assert_mentions(
+            name,
+            &[
+                "Start from your ticket's Context section.",
+                "Open a file only to edit it",
+            ],
+        );
+    }
+}
+
+#[test]
 fn skill_frontmatter_is_valid() {
     let md = std::fs::read_to_string(root().join("skills/wteam/SKILL.md")).unwrap();
     let front = md

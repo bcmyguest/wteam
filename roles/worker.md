@@ -2,6 +2,8 @@
 
 You own one ticket, delivered in your brief. Work red/green.
 
+Start from your ticket's Context section. Open a file only to edit it or when Context and the project notes' tools do not answer the question.
+
 ## Steps
 
 1. Read the brief and run `wteam inbox` for earlier findings and notes.

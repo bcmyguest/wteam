@@ -344,6 +344,7 @@ fn shell_builtins_and_chained_commands_are_checked_per_program() {
 }
 
 /// Tickets 01..=n in place, each blocked by its predecessor when `chain`, else only by 01.
+/// Each carries a `**Context:**` section so only width warnings can appear.
 fn graph(r: &Repo, n: usize, chain: bool) {
     for i in 1..=n {
         let blocked = match (i, chain) {
@@ -351,14 +352,39 @@ fn graph(r: &Repo, n: usize, chain: bool) {
             (_, true) => format!("{:02}", i - 1),
             (_, false) => "01".to_string(),
         };
-        r.ticket(
-            &format!("{i:02}"),
-            &format!("Step {i:02}"),
-            &blocked,
-            "",
-            "",
+        r.write(
+            &format!(".wteam/demo/tickets/{i:02}-step-{i:02}.md"),
+            &format!(
+                "# {i:02}: Step {i:02}\n\n**What to build:** Step {i:02}.\n\n**Blocked by:** {blocked}\n\n**Context:**\n`src/a.rs:1`  `fn a()`  — stub\n\n- [ ] it works\n"
+            ),
         );
     }
+}
+
+#[test]
+fn ticket_without_context_warns_and_passes() {
+    let r = Repo::new("demo");
+    r.ticket("01", "First thing", "None", "", "");
+    let v = json_pickup(&r, &[]);
+    assert_eq!(v["problems"], serde_json::json!([]));
+    let warnings = v["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].as_str().unwrap().contains("ticket 01"),
+        "{warnings:?}"
+    );
+    r.wteam().arg("pickup").assert().success();
+}
+
+#[test]
+fn ticket_with_context_has_no_context_warning() {
+    let r = Repo::new("demo");
+    r.write(
+        ".wteam/demo/tickets/01-first-thing.md",
+        "# 01: First thing\n\n**What to build:** First thing.\n\n**Blocked by:** None\n\n**Context:**\n`src/a.rs:1`  `fn a()`  — stub\n\n- [ ] it works\n",
+    );
+    let v = json_pickup(&r, &[]);
+    assert_eq!(v["warnings"], serde_json::json!([]));
 }
 
 #[test]

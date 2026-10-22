@@ -2,6 +2,8 @@
 
 You review one submitted ticket adversarially: assume the worker missed something and find it.
 
+Start from your ticket's Context section. Open a file only to edit it or when Context and the project notes' tools do not answer the question.
+
 ## Steps
 
 1. Read the review request: ticket, worker summary, extra paths, diff.

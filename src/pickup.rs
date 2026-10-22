@@ -43,6 +43,19 @@ fn width_warnings(tickets: usize, w: work::Width) -> Vec<String> {
     )]
 }
 
+/// One warning per ticket whose body has no `**Context:**` section.
+fn missing_context(tickets: &[Ticket]) -> Vec<String> {
+    tickets
+        .iter()
+        .filter(|t| {
+            !t.body
+                .lines()
+                .any(|l| l.trim_start().starts_with("**Context:**"))
+        })
+        .map(|t| format!("ticket {} has no **Context:** section", t.id))
+        .collect()
+}
+
 /// Import from `from` (a `.scratch/<slug>` dir) into `paths`, or verify `paths` in place when `from` is None.
 pub fn pickup(paths: &Paths, from: Option<&Path>) -> Result<PickupReport> {
     paths::init_effort(paths)?;
@@ -63,12 +76,14 @@ pub fn pickup(paths: &Paths, from: Option<&Path>) -> Result<PickupReport> {
         .unwrap_or_default();
 
     let width = work::width(&tickets);
+    let mut warnings = width_warnings(tickets.len(), width);
+    warnings.extend(missing_context(&tickets));
     Ok(PickupReport {
         slug: paths.slug.clone(),
         goal,
         imported,
         problems,
-        warnings: width_warnings(tickets.len(), width),
+        warnings,
         longest_chain: width.longest_chain,
         max_parallel: width.max_parallel,
         graph: render::work_mermaid(&tickets, &st),
