@@ -707,3 +707,184 @@ wteam submit "$id" --summary "edited $id"
         "src/01.txt"
     );
 }
+
+/// Worker that blocks ticket 01 on its first turn, leaving `earlier` in its file. Later turns
+/// record what that file holds, then wait for `go` and submit.
+const BLOCK_ONCE_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+mkdir -p src
+if [ "$id" = "01" ] && [ ! -f "$WTEAM_FAKE_DIR/blocked-once" ]; then
+  touch "$WTEAM_FAKE_DIR/blocked-once"
+  echo earlier >> src/01.txt
+  wteam block 01 --reason "stop"
+  exit 0
+fi
+[ "$id" = "01" ] && cat src/01.txt > "$WTEAM_FAKE_DIR/seen"
+i=0
+while [ ! -f "$WTEAM_FAKE_DIR/go" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id"
+"#;
+
+/// Dispatch 01 to pair 2, let its worker block it, then requeue it.
+fn block_and_requeue_01_on_pair_2(r: &Repo) {
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.wteam()
+        .args(["dispatch", "01", "--pair", "2"])
+        .assert()
+        .success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+    r.wteam().args(["requeue", "01"]).assert().success();
+}
+
+#[test]
+fn silent_reviewer_blocks_ticket_and_keeps_its_work_as_wip() {
+    let r = repo();
+    r.agent_script("reviewer", "echo idle\n");
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    go(&r);
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+
+    let pair1 = r.path().join(".wteam/demo/worktrees/pair1");
+    assert_eq!(wt_git(&pair1, &["status", "--porcelain"]), "");
+    let log = r.git(&["log", "--format=%s", "wteam/demo/01"]);
+    assert!(log.contains("wip: Add one (wteam 01, blocked)"), "{log}");
+    let files = r.git(&["show", "--name-only", "--format=", "wteam/demo/01"]);
+    assert!(files.contains("src/01.txt"), "{files}");
+}
+
+#[test]
+fn requeued_ticket_goes_to_the_pair_holding_its_branch() {
+    let r = repo();
+    r.agent_script("worker", BLOCK_ONCE_WORKER);
+    go(&r);
+    block_and_requeue_01_on_pair_2(&r);
+
+    // Pair 1 is idle and lower-numbered, but the branch lives in pair 2's worktree.
+    r.wteam().args(["dispatch", "--fill"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    let s = r.state();
+    assert_eq!(s["tickets"]["01"]["pair"], 2);
+    assert!(r.read(".wteam-fake/seen").contains("earlier"));
+}
+
+#[test]
+fn requeued_ticket_waits_while_the_pair_holding_its_branch_is_busy() {
+    let r = repo();
+    r.agent_script("worker", BLOCK_ONCE_WORKER);
+    block_and_requeue_01_on_pair_2(&r);
+    r.write("src/02.txt", "");
+    // Pretend ticket 02 holds pair 2 (the pair that keeps 01's branch).
+    let mut s = r.state();
+    s["tickets"]["02"] = serde_json::json!({
+        "status": "doing", "rounds": 0, "assignee": "worker.2", "pair": 2,
+        "passes": [], "extras": [], "replans": 0, "land_conflicts": 0
+    });
+    r.write(
+        ".wteam/demo/state.json",
+        &serde_json::to_string(&s).unwrap(),
+    );
+
+    r.wteam()
+        .args(["dispatch", "--fill"])
+        .assert()
+        .success()
+        .stdout(contains("nothing to dispatch"));
+    assert_eq!(r.state()["tickets"]["01"]["status"], "todo");
+
+    // Pair 2 frees; 01 goes there.
+    let mut s = r.state();
+    s["tickets"]["02"] = serde_json::json!({
+        "status": "todo", "rounds": 0, "passes": [], "extras": [], "replans": 0,
+        "land_conflicts": 0
+    });
+    r.write(
+        ".wteam/demo/state.json",
+        &serde_json::to_string(&s).unwrap(),
+    );
+    r.wteam().args(["dispatch", "--fill"]).assert().success();
+    assert_eq!(r.state()["tickets"]["01"]["pair"], 2);
+}
+
+#[test]
+fn dispatch_error_for_one_ticket_does_not_stop_fill() {
+    let r = repo();
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    // Branch 01 is checked out outside the pairs, so dispatching 01 fails.
+    r.git(&["branch", "wteam/demo/01", "HEAD"]);
+    let elsewhere = tempfile::tempdir().unwrap();
+    r.git(&[
+        "worktree",
+        "add",
+        &elsewhere.path().to_string_lossy(),
+        "wteam/demo/01",
+    ]);
+
+    // The CLI reports the failure, but the fill still dispatches 02.
+    r.wteam()
+        .args(["dispatch", "--fill"])
+        .assert()
+        .failure()
+        .stdout(contains("dispatched 02"))
+        .stderr(contains("dispatch failed for 01"));
+    let s = r.state();
+    assert_eq!(s["tickets"]["02"]["status"], "doing");
+    assert_ne!(s["tickets"]["01"]["status"], "doing");
+}
+
+/// Worker that edits its file and then fails its adapter turn (non-zero exit, no submit).
+const CRASHING_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+mkdir -p src
+echo edit >> "src/$id.txt"
+exit 1
+"#;
+
+#[test]
+fn adapter_failure_blocks_ticket_and_keeps_its_work_as_wip() {
+    let r = repo();
+    r.agent_script("worker", CRASHING_WORKER);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+
+    let pair1 = r.path().join(".wteam/demo/worktrees/pair1");
+    assert_eq!(wt_git(&pair1, &["status", "--porcelain"]), "");
+    let log = r.git(&["log", "--format=%s", "wteam/demo/01"]);
+    assert!(log.contains("wip: Add one (wteam 01, blocked)"), "{log}");
+    let files = r.git(&["show", "--name-only", "--format=", "wteam/demo/01"]);
+    assert!(files.contains("src/01.txt"), "{files}");
+}
+
+#[test]
+fn permanently_failing_dispatch_blocks_after_three_attempts_and_the_run_goes_on() {
+    let r = repo();
+    go(&r);
+    r.agent_script("orchestrator", "echo ok\n");
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    // Branch 01 is checked out outside the pairs, so every dispatch of 01 fails.
+    r.git(&["branch", "wteam/demo/01", "HEAD"]);
+    let elsewhere = tempfile::tempdir().unwrap();
+    r.git(&[
+        "worktree",
+        "add",
+        &elsewhere.path().to_string_lossy(),
+        "wteam/demo/01",
+    ]);
+
+    let out = r
+        .wteam()
+        .args(["run", "--dispatch", "auto", "--pairs", "2"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(text.contains("dispatch failed 3 times"), "{text}");
+    let s = r.state();
+    assert_eq!(s["tickets"]["02"]["status"], "done");
+    assert_eq!(s["tickets"]["01"]["status"], "blocked");
+    assert_eq!(s["tickets"]["01"]["dispatch_failures"], 3);
+}

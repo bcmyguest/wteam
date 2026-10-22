@@ -5,7 +5,7 @@
 //! Its turns run here, in the foreground, through the adapter. Between turns the
 //! loop waits for workers and reviewers, then resumes it with a digest.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -68,13 +68,21 @@ struct Snapshot {
 
 /// Drive the orchestrator until the run stops. Returns the stop report text.
 pub fn run(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
-    let reason = drive(ctx, opts)?;
+    let mut failed = BTreeMap::new();
+    let reason = drive(ctx, opts, &mut failed)?;
     let report = crate::report::stop_report(&ctx.paths)?;
-    Ok(format!("Run stopped: {reason}.\n\n{report}"))
+    let mut text = format!("Run stopped: {reason}.\n\n{report}");
+    if !failed.is_empty() {
+        text.push_str("\n\nDispatch failed (tickets stay ready):");
+        for (ticket, err) in &failed {
+            text.push_str(&format!("\n- {ticket}: {err}"));
+        }
+    }
+    Ok(text)
 }
 
 /// The turn loop. Returns why the run stopped.
-fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
+fn drive(ctx: &Ctx, opts: &RunOptions, failed: &mut DispatchFailures) -> Result<String> {
     state::with_state(&ctx.paths, |s| {
         if s.orchestrator_generation == 0 {
             s.orchestrator_generation = 1;
@@ -88,7 +96,7 @@ fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
         Ok(())
     })?;
     if is_auto(ctx)? {
-        return drive_auto(ctx, opts);
+        return drive_auto(ctx, opts, failed);
     }
     let mut prompt = kickoff(ctx, None)?;
     let mut turns = 0;
@@ -142,7 +150,7 @@ fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
             continue;
         }
         idle_turns = 0;
-        match await_next(ctx, opts)? {
+        match await_next(ctx, opts, failed)? {
             Next::Digest(digest) => prompt = digest,
             Next::Stop(why) => return Ok(why),
         }
@@ -157,11 +165,11 @@ fn is_auto(ctx: &Ctx) -> Result<bool> {
 /// `auto` dispatch. The orchestrator is never prompted for dispatch: `await_next` fills the pairs
 /// as they free up. Each wake carries the blocked tickets and human gates; the first wake of a
 /// generation also carries the goal. A handoff's baton rides on the next wake.
-fn drive_auto(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
+fn drive_auto(ctx: &Ctx, opts: &RunOptions, failed: &mut DispatchFailures) -> Result<String> {
     let mut turns = 0;
     let mut carried: Option<String> = None;
     loop {
-        let digest = match await_next(ctx, opts)? {
+        let digest = match await_next(ctx, opts, failed)? {
             Next::Digest(digest) => digest,
             Next::Stop(why) => return Ok(why),
         };
@@ -483,15 +491,39 @@ fn wteam_output(ctx: &Ctx, cmd: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
 }
 
+/// Ticket id to the error of its latest failed auto dispatch. The ticket stays ready and the
+/// run goes on; the stop report lists these.
+type DispatchFailures = BTreeMap<String, String>;
+
+/// Auto-dispatch what fits. A failed ticket is logged once per distinct error and kept in `failed`.
+fn fill_pairs(ctx: &Ctx, failed: &mut DispatchFailures) -> Result<()> {
+    let fill = crate::engine::fill(ctx)?;
+    for (ticket, _) in &fill.started {
+        failed.remove(ticket);
+    }
+    for (ticket, err) in fill.failed {
+        if fill.blocked.contains(&ticket) {
+            eprintln!("wteam: ticket {ticket} blocked after failed dispatches: {err}");
+            failed.remove(&ticket);
+            continue;
+        }
+        if failed.get(&ticket) != Some(&err) {
+            eprintln!("wteam: dispatch of {ticket} failed, left ready: {err}");
+        }
+        failed.insert(ticket, err);
+    }
+    Ok(())
+}
+
 /// Wait until the orchestrator has a digest, or the run must stop.
-fn await_next(ctx: &Ctx, opts: &RunOptions) -> Result<Next> {
+fn await_next(ctx: &Ctx, opts: &RunOptions, failed: &mut DispatchFailures) -> Result<Next> {
     let deadline = Instant::now() + Duration::from_secs(opts.timeout_secs);
     let auto = is_auto(ctx)?;
     loop {
         // Re-deliver to agents whose turn process died mid-run, not only at command start.
         crate::engine::heal(ctx)?;
-        if auto && let Err(e) = crate::engine::fill(ctx) {
-            return Ok(Next::Stop(format!("dispatch failed: {e:#}")));
+        if auto {
+            fill_pairs(ctx, failed)?;
         }
         let snap = snapshot(ctx, auto)?;
         if let Some((used, budget)) = snap.over_budget {
@@ -503,7 +535,8 @@ fn await_next(ctx: &Ctx, opts: &RunOptions) -> Result<Next> {
             }
         } else if let Some(digest) = snap.digest {
             return Ok(Next::Digest(digest));
-        } else if !(snap.in_flight || snap.awaiting) {
+        } else if !(snap.in_flight || snap.awaiting || !failed.is_empty()) {
+            // A ticket with a failed dispatch still gets retried, so the run keeps waiting.
             return Ok(Next::Stop(if snap.ready > 0 {
                 "ready tickets were not dispatched".to_string()
             } else {

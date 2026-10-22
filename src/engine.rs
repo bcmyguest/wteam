@@ -2,6 +2,7 @@
 //! here, never through a model. The orchestrator model only decomposes,
 //! dispatches and decides what to do about blocked tickets.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -131,6 +132,8 @@ const CHECK_TAIL_LINES: usize = 40;
 
 /// How long a busy agent may lack a pid before its spawn counts as dead (30 s).
 const SPAWN_GRACE_NANOS: u64 = 30_000_000_000;
+/// Consecutive failed dispatches after which a ticket blocks instead of staying ready.
+pub const DISPATCH_ATTEMPTS: u32 = 3;
 
 /// Normalise `1`/`#01` to the two-digit ticket id and load its definition.
 fn find_ticket(ctx: &Ctx, id: &str) -> Result<Ticket> {
@@ -718,21 +721,35 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         } else {
             Vec::new()
         };
-        let n = match pair {
-            Some(n) if n < 1 || n > pairs => bail!("no pair {n} (team has {pairs})"),
-            Some(n) if busy_pairs.contains(&n) => bail!("pair {n} is busy"),
-            Some(n) => n,
-            None => match (1..=pairs).find(|n| !busy_pairs.contains(n) && !dirty.contains(n)) {
-                Some(n) => n,
-                None if dirty.is_empty() => bail!("every pair is busy"),
-                None => {
-                    let list: Vec<String> = dirty.iter().map(|n| format!("pair {n}")).collect();
-                    bail!(
-                        "every idle pair is busy or has uncommitted work (dirty: {})",
-                        list.join(", ")
-                    )
+        // A ticket whose branch is checked out in a pair's worktree goes back to that pair.
+        let holder = if s.run.isolation == "worktree" {
+            worktree::holders(&ctx.paths)?.get(&t.id).copied()
+        } else {
+            None
+        };
+        let n = match (pair, holder) {
+            (Some(n), _) if n < 1 || n > pairs => bail!("no pair {n} (team has {pairs})"),
+            (Some(n), Some(h)) if n != h => bail!(
+                "ticket {} is on the branch held by pair {h}; dispatch it to pair {h}",
+                t.id
+            ),
+            (_, Some(h)) if busy_pairs.contains(&h) => bail!("pair {h} is busy"),
+            (_, Some(h)) => h,
+            (Some(n), None) if busy_pairs.contains(&n) => bail!("pair {n} is busy"),
+            (Some(n), None) => n,
+            (None, None) => {
+                match (1..=pairs).find(|n| !busy_pairs.contains(n) && !dirty.contains(n)) {
+                    Some(n) => n,
+                    None if dirty.is_empty() => bail!("every pair is busy"),
+                    None => {
+                        let list: Vec<String> = dirty.iter().map(|n| format!("pair {n}")).collect();
+                        bail!(
+                            "every idle pair is busy or has uncommitted work (dirty: {})",
+                            list.join(", ")
+                        )
+                    }
                 }
-            },
+            }
         };
         if s.run.isolation == "worktree" {
             worktree::prepare(&ctx.paths, n, &t.id)?;
@@ -743,6 +760,7 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         ts.assignee = Some(agent.clone());
         ts.pair = Some(n);
         ts.blocked_reason = None;
+        ts.dispatch_failures = 0;
         ts.passes.clear();
         ts.extras.clear();
         Ok((
@@ -768,43 +786,47 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
     Ok(agent)
 }
 
-/// Dispatch every dispatchable ready ticket, lowest id first, until no ticket is left or
-/// no pair is free. Returns `(ticket, agent)` per dispatch.
-pub fn fill(ctx: &Ctx) -> Result<Vec<(String, String)>> {
-    let tickets = work::load_tickets(&ctx.paths.tickets_dir())?;
-    let role = dispatch_role(ctx);
-    let mut started = Vec::new();
-    loop {
-        let s = crate::state::load(&ctx.paths)?;
-        let dirty = if s.run.isolation == "worktree" {
-            worktree::dirty_pairs(&ctx.paths, ctx.team.count(&role))
-        } else {
-            Vec::new()
-        };
-        let mut candidates = work::dispatchable(&tickets, &s, &dirty);
-        candidates.sort();
-        let Some(id) = candidates.first().cloned() else {
-            return Ok(started);
-        };
-        match dispatch(ctx, &id, None) {
-            Ok(agent) => started.push((id, agent)),
-            Err(e) => {
-                return Err(FillError {
-                    started,
-                    message: format!("{e:#}"),
-                }
-                .into());
-            }
-        }
-    }
+/// Outcome of [`fill`]: the dispatches that stand, and the tickets whose dispatch failed.
+#[derive(Debug, Default)]
+pub struct Fill {
+    /// `(ticket, agent)` per dispatch made.
+    pub started: Vec<(String, String)>,
+    /// `(ticket, error)` per dispatch that failed. The ticket stays ready unless it is in `blocked`.
+    pub failed: Vec<(String, String)>,
+    /// Tickets whose failed dispatch reached `DISPATCH_ATTEMPTS` and were blocked.
+    pub blocked: Vec<String>,
 }
 
-/// A `fill` that stopped after dispatching `started`: those dispatches stand.
+/// Count a failed dispatch of `id`. At `DISPATCH_ATTEMPTS` in a row the ticket blocks with
+/// `dispatch failed N times: <error>` and the orchestrator is mailed. Returns whether it blocked.
+fn record_dispatch_failure(ctx: &Ctx, id: &str, error: &str) -> Result<bool> {
+    let reason = crate::state::with_state(&ctx.paths, |s| {
+        let ts = s.ticket_mut(id);
+        ts.dispatch_failures += 1;
+        if ts.dispatch_failures < DISPATCH_ATTEMPTS {
+            return Ok(None);
+        }
+        let reason = format!("dispatch failed {DISPATCH_ATTEMPTS} times: {error}");
+        ts.status = TicketStatus::Blocked;
+        ts.blocked_reason = Some(reason.clone());
+        s.push_event(EventKind::Blocked, Some(id), None, reason.as_str());
+        Ok(Some(reason))
+    })?;
+    let Some(reason) = reason else {
+        return Ok(false);
+    };
+    crate::mailbox::append_ticket(&ctx.paths, "orchestrator.1", "wteam", Some(id), &reason)?;
+    Ok(true)
+}
+
+/// A `dispatch --fill` where some dispatches failed: the others still stand. The CLI exits
+/// non-zero and lists `started`.
 #[derive(Debug)]
 pub struct FillError {
-    /// `(ticket, agent)` for each dispatch made before the failure.
+    /// `(ticket, agent)` for each dispatch that stood.
     pub started: Vec<(String, String)>,
-    message: String,
+    /// One line per failed ticket; it stays ready.
+    pub message: String,
 }
 
 impl std::fmt::Display for FillError {
@@ -814,6 +836,56 @@ impl std::fmt::Display for FillError {
 }
 
 impl std::error::Error for FillError {}
+
+/// Dispatch every dispatchable ready ticket, lowest id first, until no ticket is left or
+/// no pair is free. A ticket whose dispatch fails is recorded and skipped; the rest still run.
+/// A ticket whose branch sits in a busy pair waits for that pair.
+pub fn fill(ctx: &Ctx) -> Result<Fill> {
+    let tickets = work::load_tickets(&ctx.paths.tickets_dir())?;
+    let role = dispatch_role(ctx);
+    let mut out = Fill::default();
+    let mut tried = BTreeSet::new();
+    loop {
+        let s = crate::state::load(&ctx.paths)?;
+        let worktree = s.run.isolation == "worktree";
+        let dirty = if worktree {
+            worktree::dirty_pairs(&ctx.paths, ctx.team.count(&role))
+        } else {
+            Vec::new()
+        };
+        let holders = if worktree {
+            worktree::holders(&ctx.paths)?
+        } else {
+            BTreeMap::new()
+        };
+        let busy: BTreeSet<u32> = s
+            .tickets
+            .values()
+            .filter(|ts| matches!(ts.status, TicketStatus::Doing | TicketStatus::Review))
+            .filter_map(|ts| ts.pair)
+            .collect();
+        let mut candidates: Vec<String> = work::dispatchable(&tickets, &s, &dirty)
+            .into_iter()
+            .filter(|id| !tried.contains(id))
+            .filter(|id| holders.get(id).is_none_or(|h| !busy.contains(h)))
+            .collect();
+        candidates.sort();
+        let Some(id) = candidates.first().cloned() else {
+            return Ok(out);
+        };
+        tried.insert(id.clone());
+        match dispatch(ctx, &id, None) {
+            Ok(agent) => out.started.push((id, agent)),
+            Err(e) => {
+                let error = format!("{e:#}");
+                if record_dispatch_failure(ctx, &id, &error)? {
+                    out.blocked.push(id.clone());
+                }
+                out.failed.push((id, error));
+            }
+        }
+    }
+}
 
 /// Reject an `--extra` that is not one literal file path inside the repo, so a PASS
 /// cannot commit outside it. The error names the extra and the rule it broke.
@@ -1269,8 +1341,17 @@ fn fail_round(
         Ok(s.ticket_mut(&t.id).rounds + 1)
     })?;
     let capped = rounds >= max;
+    let kept = if capped {
+        keep_pair_work(ctx, &t.id)?
+    } else {
+        None
+    };
     if capped {
-        let note = format!("Ticket {} blocked: {reason}", t.id);
+        let mut note = format!("Ticket {} blocked: {reason}", t.id);
+        if let Some(kept) = kept {
+            note.push('\n');
+            note.push_str(&kept);
+        }
         crate::mailbox::append_ticket(&ctx.paths, "orchestrator.1", by, Some(&t.id), &note)?;
     } else {
         let mut body = format!(
@@ -1335,6 +1416,45 @@ fn check_blockable(s: &State, ticket: &str, agent: &str, role: &str) -> Result<(
     Ok(())
 }
 
+/// Every path that blocks a ticket calls this first. Under worktree isolation it commits the
+/// ticket's pair's uncommitted work as a wip commit on the ticket's branch, so the pair is clean
+/// and reusable. Returns the note to report when that fails and the pair stays dirty.
+pub fn keep_pair_work(ctx: &Ctx, ticket: &str) -> Result<Option<String>> {
+    let s = crate::state::load(&ctx.paths)?;
+    if s.run.isolation != "worktree" {
+        return Ok(None);
+    }
+    let Some(pair) = s.tickets.get(ticket).and_then(|ts| ts.pair) else {
+        return Ok(None);
+    };
+    let t = find_ticket(ctx, ticket)?;
+    Ok(
+        match worktree::preserve(&ctx.paths, pair, &t.id, &t.title) {
+            Ok(_) => None,
+            Err(e) => Some(format!(
+                "Uncommitted work left in pair {pair}, not preserved: {e:#}"
+            )),
+        },
+    )
+}
+
+/// Block `id`, held by `agent`, with `reason`. The pair's work is kept first, outside the state
+/// lock; the flip re-checks that `agent` still holds the ticket. Returns the kept-work note on
+/// failure, as [`keep_pair_work`] does.
+pub fn block_held(ctx: &Ctx, agent: &str, id: &str, reason: &str) -> Result<Option<String>> {
+    let kept = keep_pair_work(ctx, id)?;
+    crate::state::with_state(&ctx.paths, |s| {
+        let expect = s.tickets.get(id).map(|ts| ts.status).unwrap_or_default();
+        ensure_holder(s, id, agent, expect)?;
+        let ts = s.ticket_mut(id);
+        ts.status = TicketStatus::Blocked;
+        ts.blocked_reason = Some(reason.to_string());
+        s.push_event(EventKind::Blocked, Some(id), Some(agent), reason);
+        Ok(())
+    })?;
+    Ok(kept)
+}
+
 /// Mark `ticket` blocked with `reason` and tell the orchestrator. Under worktree isolation the
 /// pair's uncommitted work is first committed to the ticket's branch as a wip commit, so the
 /// pair is reusable at once. A failed commit leaves the pair dirty and the orchestrator is told.
@@ -1343,13 +1463,7 @@ pub fn block(ctx: &Ctx, agent: &str, ticket: &str, reason: &str) -> Result<()> {
     let (role, _) = parse_instance(agent);
     let s = crate::state::load(&ctx.paths)?;
     check_blockable(&s, &t.id, agent, &role)?;
-    let mut kept = None;
-    if s.run.isolation == "worktree"
-        && let Some(pair) = s.tickets.get(&t.id).and_then(|ts| ts.pair)
-        && let Err(e) = worktree::preserve(&ctx.paths, pair, &t.id, &t.title)
-    {
-        kept = Some((pair, format!("{e:#}")));
-    }
+    let kept = keep_pair_work(ctx, &t.id)?;
     crate::state::with_state(&ctx.paths, |s| {
         check_blockable(s, &t.id, agent, &role)?;
         let ts = s.ticket_mut(&t.id);
@@ -1359,10 +1473,9 @@ pub fn block(ctx: &Ctx, agent: &str, ticket: &str, reason: &str) -> Result<()> {
         Ok(())
     })?;
     let mut note = format!("Ticket {} blocked by {agent}: {reason}", t.id);
-    if let Some((pair, err)) = kept {
-        note.push_str(&format!(
-            "\nUncommitted work left in pair {pair}, not preserved: {err}"
-        ));
+    if let Some(kept) = kept {
+        note.push('\n');
+        note.push_str(&kept);
     }
     crate::mailbox::append_ticket(&ctx.paths, "orchestrator.1", agent, Some(&t.id), &note)?;
     Ok(())

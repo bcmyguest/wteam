@@ -15,17 +15,38 @@ use crate::state::{TicketStatus, Verdict, VerdictKind};
 pub fn dispatch(g: &Global, a: &DispatchArgs) -> Result<Out> {
     let ctx = Ctx::load(super::effort(g)?)?;
     if a.fill {
-        let started = engine::fill(&ctx)?;
-        let text = if started.is_empty() {
+        let fill = engine::fill(&ctx)?;
+        if !fill.failed.is_empty() {
+            let message = fill
+                .failed
+                .iter()
+                .map(|(ticket, err)| {
+                    let state = if fill.blocked.contains(ticket) {
+                        "now blocked"
+                    } else {
+                        "left ready"
+                    };
+                    format!("dispatch failed for {ticket}, {state}: {err}")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Err(engine::FillError {
+                started: fill.started,
+                message,
+            }
+            .into());
+        }
+        let text = if fill.started.is_empty() {
             "nothing to dispatch".to_string()
         } else {
-            started
+            fill.started
                 .iter()
                 .map(|(ticket, agent)| format!("dispatched {ticket} to {agent}"))
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        let list: Vec<_> = started
+        let list: Vec<_> = fill
+            .started
             .iter()
             .map(|(ticket, agent)| json!({ "ticket": ticket, "agent": agent }))
             .collect();
@@ -185,6 +206,7 @@ pub fn requeue(g: &Global, a: &RequeueArgs) -> Result<Out> {
         }
         ts.status = TicketStatus::Todo;
         ts.rounds = 0;
+        ts.dispatch_failures = 0;
         ts.assignee = None;
         ts.pair = None;
         ts.blocked_reason = None;

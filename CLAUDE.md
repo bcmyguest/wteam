@@ -40,7 +40,7 @@ cd site && pnpm install && pnpm build       # docs site (Astro + Starlight)
 ```
 
 wteam ticket commands (orchestrator, `src/commands/tickets.rs`):
-`dispatch NN [--pair N]` or `dispatch --fill` (every dispatchable ready ticket, lowest id first), `requeue NN [--note TEXT]` (blocked tickets only: back to todo,
+`dispatch NN [--pair N]` or `dispatch --fill` (every dispatchable ready ticket, lowest id first; a ticket whose branch sits in a pair's worktree goes back to that pair, and `fill` skips it while that pair is busy; a failed dispatch leaves the ticket ready and the rest still dispatch; after 3 failures in a row it blocks, reset by `requeue`), `requeue NN [--note TEXT]` (blocked tickets only: back to todo,
 review rounds reset, note goes into the next dispatch brief), `approve NN` (human gate).
 
 `tests/docs.rs` checks that every `--flag` in README.md appears in some `wteam <cmd> --help`

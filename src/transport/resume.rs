@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 use super::Transport;
 use crate::adapters::{self, CommandSpec, TurnOutput, TurnRequest};
 use crate::engine::Ctx;
-use crate::state::{self, EventKind, State, TicketStatus};
+use crate::state::{self, State, TicketStatus};
 use crate::team::{NodeKind, agents, parse_instance};
 
 pub struct Resume;
@@ -178,8 +178,9 @@ enum Settle {
     Idle,
     /// Held ticket and this is the first silent turn: mail this re-prompt and keep going.
     Reprompt(String),
-    /// Held ticket after a silent turn: the ticket is blocked, the orchestrator told.
-    Blocked(String),
+    /// Held ticket after a silent turn: block it (ticket id, reason). The caller blocks it outside
+    /// the state lock and tells the orchestrator.
+    Blocked(String, String),
 }
 
 /// Decide the fate of a silent turn (no mail left, ticket still held). Mutates `s` only.
@@ -212,11 +213,7 @@ fn settle(s: &mut State, agent: &str, role: &str) -> Settle {
     } else {
         format!("{role} ended without submitting")
     };
-    let t = s.ticket_mut(&id);
-    t.status = TicketStatus::Blocked;
-    t.blocked_reason = Some(reason.clone());
-    s.push_event(EventKind::Blocked, Some(&id), Some(agent), reason.clone());
-    Settle::Blocked(format!("Ticket {id} blocked by {agent}: {reason}"))
+    Settle::Blocked(id, reason)
 }
 
 /// Run turns for `agent` until its mailbox has no undelivered mail, then settle the silence.
@@ -243,10 +240,7 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
                     release(s, agent);
                     Turn::Stop
                 }
-                Settle::Blocked(note) => {
-                    release(s, agent);
-                    Turn::Blocked(note)
-                }
+                Settle::Blocked(id, reason) => Turn::Blocked(id, reason),
             })
         });
         let next = match next {
@@ -265,7 +259,18 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
             Turn::Reprompt(body) => {
                 crate::mailbox::append(&ctx.paths, agent, "wteam", &body)?;
             }
-            Turn::Blocked(note) => {
+            Turn::Blocked(id, reason) => {
+                // The agent stays busy while its pair's work is committed, then is released.
+                let blocked = crate::engine::block_held(ctx, agent, &id, &reason);
+                state::with_state(&ctx.paths, |s| {
+                    release(s, agent);
+                    Ok(())
+                })?;
+                let mut note = format!("Ticket {id} blocked by {agent}: {reason}");
+                if let Some(kept) = blocked? {
+                    note.push('\n');
+                    note.push_str(&kept);
+                }
                 crate::mailbox::append(&ctx.paths, "orchestrator.1", agent, &note)?;
                 return Ok(());
             }
@@ -283,7 +288,7 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
 enum Turn {
     Run(bool, Option<String>, u32, String),
     Reprompt(String),
-    Blocked(String),
+    Blocked(String, String),
     Stop,
 }
 
@@ -538,27 +543,31 @@ fn run_spec(
 /// A turn failed: block the agent's ticket, tell the orchestrator, go idle.
 fn fail_turn(ctx: &Ctx, agent: &str, error: &str) -> Result<()> {
     let reason = format!("{agent} turn failed: {error}");
-    let held = state::with_state(&ctx.paths, |s| {
-        release(s, agent);
-        let held: Vec<String> = s
-            .tickets
+    let held: Vec<String> = state::with_state(&ctx.paths, |s| {
+        Ok(s.tickets
             .iter()
             .filter(|(_, t)| {
                 t.assignee.as_deref() == Some(agent)
                     && matches!(t.status, TicketStatus::Doing | TicketStatus::Review)
             })
             .map(|(id, _)| id.clone())
-            .collect();
-        for id in &held {
-            let t = s.ticket_mut(id);
-            t.status = TicketStatus::Blocked;
-            t.blocked_reason = Some(reason.clone());
-            s.push_event(EventKind::Blocked, Some(id), Some(agent), reason.clone());
-        }
-        Ok(held)
+            .collect())
     })?;
+    // The agent stays busy while each pair's work is committed, then is released.
+    let mut body = reason.clone();
+    let blocked = held.iter().try_for_each(|id| -> Result<()> {
+        if let Some(kept) = crate::engine::block_held(ctx, agent, id, &reason)? {
+            body.push_str(&format!("\n{id}: {kept}"));
+        }
+        Ok(())
+    });
+    state::with_state(&ctx.paths, |s| {
+        release(s, agent);
+        Ok(())
+    })?;
+    blocked?;
     let ticket = held.first().map(String::as_str);
-    crate::mailbox::append_ticket(&ctx.paths, "orchestrator.1", agent, ticket, &reason)?;
+    crate::mailbox::append_ticket(&ctx.paths, "orchestrator.1", agent, ticket, &body)?;
     Ok(())
 }
 

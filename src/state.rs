@@ -78,6 +78,10 @@ pub struct TicketState {
     /// Replaced by each submit, cleared on dispatch.
     #[serde(default)]
     pub extras: Vec<String>,
+    /// Dispatch attempts that failed in a row. Reset by a successful dispatch and by `requeue`.
+    /// The ticket blocks at `DISPATCH_ATTEMPTS`.
+    #[serde(default)]
+    pub dispatch_failures: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

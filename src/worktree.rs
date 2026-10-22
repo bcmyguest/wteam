@@ -1,6 +1,7 @@
 //! Optional worktree isolation: one git worktree per pair under `worktrees/`,
 //! merged back fast-forward after the ticket passes.
 
+use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -57,6 +58,36 @@ fn lock(paths: &Paths) -> Result<std::fs::File> {
         .context("opening merge lock")?;
     file.lock().context("locking merges")?;
     Ok(file)
+}
+
+/// Ticket id to the pair whose worktree has that ticket's branch checked out. A branch checked
+/// out anywhere else is not listed: creating its worktree on a pair then fails in git.
+pub fn holders(paths: &Paths) -> Result<BTreeMap<String, u32>> {
+    let out = git(&paths.root, &["worktree", "list", "--porcelain"])?;
+    let prefix = format!("wteam/{}/", paths.slug);
+    let pairs_dir = std::fs::canonicalize(paths.worktrees_dir()).ok();
+    let mut map = BTreeMap::new();
+    let mut dir: Option<PathBuf> = None;
+    for line in out.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            dir = Some(PathBuf::from(p));
+        } else if let Some(ticket) = line
+            .strip_prefix("branch refs/heads/")
+            .and_then(|b| b.strip_prefix(&prefix))
+        {
+            let Some(d) = dir.as_ref().and_then(|d| std::fs::canonicalize(d).ok()) else {
+                continue;
+            };
+            let pair = d
+                .parent()
+                .filter(|parent| Some(*parent) == pairs_dir.as_deref())
+                .and_then(|_| d.file_name()?.to_str()?.strip_prefix("pair")?.parse().ok());
+            if let Some(pair) = pair {
+                map.insert(ticket.to_string(), pair);
+            }
+        }
+    }
+    Ok(map)
 }
 
 /// Whether pair `pair`'s worktree has uncommitted changes. A git failure counts as dirty.
