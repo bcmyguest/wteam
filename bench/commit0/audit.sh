@@ -8,9 +8,9 @@ set -u
 find "$@" -type f \( -name '*.json' -o -name '*.log' -o -name '*.jsonl' \) | python3 -c '
 import json, re, sys
 import os
-pat = re.compile(r"commit0-cache|commit0-ref|commit0-venvs/[^/ ]*/lib|site-packages|pip3? (download|install|show)|find / |pypi|github\.com/scott-griffiths|wteam-bench/runs")
+pat = re.compile(r"commit0-cache|commit0-ref|commit0-venvs/[^/ ]*/lib|site-packages|pip3? (download|install|show)|find / |pypi|github\.com/scott-griffiths|wteam-bench/(runs|tasks)")
 own = os.environ.get("OWN", "\0")
-other_run = re.compile(r"/tmp/[\w.-]*(bitstring|tinydb|voluptuous|marshmallow|imapclient)[\w./-]*")
+other_run = re.compile(r"/tmp/[\w.-]*(bitstring|tinydb|voluptuous|marshmallow|imapclient|incidentkit)[\w./-]*")
 def flagged(text):
     return pat.search(text) or any(not m.group(0).startswith(own) and not m.group(0).startswith(own + ".logs") for m in other_run.finditer(text))
 hits = set()

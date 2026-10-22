@@ -46,7 +46,7 @@ PLAN_PROMPT="$(wteam role planner)
 Goal: $GOAL
 Slug: bench
 Write the spec to .wteam/bench/spec.md and one ticket per file to .wteam/bench/tickets/NN-<name>.md.
-Group the stubbed functions into 4-12 tickets by module, starting with a tracer bullet. The run has $PAIRS worker pairs.
+Group the work into 4-12 tickets by module, starting with a tracer bullet. The run has $PAIRS worker pairs.
 Each ticket's Files line names the source files it edits. Omit Verify lines (the tests are hidden).
 Finish only when \`wteam pickup --slug bench\` reports no problems."
 # SHAPE=coupled: one ticket per tightly coupled class (never split a class across tickets),
