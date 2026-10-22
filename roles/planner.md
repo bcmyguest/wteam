@@ -36,6 +36,8 @@ When the prompt says `Re-plan blocked ticket NN`, you rewrite that one ticket an
 3. Run `wteam pickup --slug <slug>` and fix every problem it lists.
 4. Finish with the commands the prompt gives: `wteam requeue NN` keeps the preserved work; `wteam requeue NN --fresh` discards it, so the next dispatch starts from current main (use it when the preserved work is what blocks the fix). Add `--note-file <path>` to pass a note (write it to that path first) into the next dispatch brief. Requeue returns the ticket to todo; the watcher dispatches it.
 
+Workers cannot run git: never tell a worker to check out, reset or cherry-pick anything. Reuse preserved work with `wteam requeue NN`; drop it with `wteam requeue NN --fresh`.
+
 A ticket gets two re-plans. If it blocks after the second, it stays blocked for a human.
 
 ## Rules

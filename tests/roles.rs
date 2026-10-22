@@ -441,3 +441,10 @@ fn worker_and_reviewer_carry_planner_split_and_retry_rule() {
 fn planner_carries_scope_and_skeleton_rules() {
     assert_mentions("planner", &[SCOPE_RULE, SKELETON_RULE]);
 }
+
+const NO_GIT_RULE: &str = "Workers cannot run git: never tell a worker to check out, reset or cherry-pick anything. Reuse preserved work with `wteam requeue NN`; drop it with `wteam requeue NN --fresh`.";
+
+#[test]
+fn replanner_never_hands_workers_git_commands() {
+    assert_mentions("planner", &[NO_GIT_RULE]);
+}
