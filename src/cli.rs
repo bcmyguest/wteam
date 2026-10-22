@@ -72,6 +72,8 @@ pub enum Command {
     Restore,
     /// Print the stop report.
     Report,
+    /// Print a resolved role prompt (project → config dir → built-in).
+    Role(RoleArgs),
     /// Render the team or work graph as Mermaid.
     Graph(GraphArgs),
     /// Show how permission profiles translate per CLI (✔ exact, ≈ lossy, ✘ unsupported).
@@ -91,6 +93,12 @@ pub struct PickupArgs {
     /// Directory written by /to-tickets (`.scratch/<slug>`); omit to verify `.wteam/<slug>` in place.
     #[arg(long)]
     pub from: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct RoleArgs {
+    /// Role name: `planner`, `worker`, or any `roles/<name>.md`.
+    pub name: String,
 }
 
 #[derive(Debug, Args)]

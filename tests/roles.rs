@@ -2,6 +2,11 @@
 
 use std::path::PathBuf;
 
+use serde_json::Value;
+use support::Repo;
+
+mod support;
+
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -108,6 +113,76 @@ fn skill_frontmatter_is_valid() {
         !desc.is_empty() && desc.len() < 500,
         "description is {} chars",
         desc.len()
+    );
+}
+
+fn stdout_of(repo: &Repo, args: &[&str]) -> String {
+    let out = repo.wteam().args(args).assert().success();
+    String::from_utf8(out.get_output().stdout.clone()).unwrap()
+}
+
+fn role_json(repo: &Repo, name: &str) -> Value {
+    serde_json::from_str(&stdout_of(repo, &["role", name, "--json"])).unwrap()
+}
+
+#[test]
+fn role_built_in_prints_prompt() {
+    let repo = Repo::new("alpha");
+    let text = include_str!("../roles/planner.md");
+    assert_eq!(
+        stdout_of(&repo, &["role", "planner"]).trim_end(),
+        text.trim_end()
+    );
+    let json = role_json(&repo, "planner");
+    assert_eq!(json["name"], "planner");
+    assert_eq!(json["source"], "built-in");
+    assert_eq!(json["text"], text);
+}
+
+#[test]
+fn role_project_override_wins() {
+    let repo = Repo::new("alpha");
+    repo.write(".wteam/roles/planner.md", "project planner\n");
+    repo.write(".wteam-config/roles/planner.md", "config planner\n");
+    let json = role_json(&repo, "planner");
+    assert_eq!(json["source"], "project");
+    assert_eq!(json["text"], "project planner\n");
+}
+
+#[test]
+fn role_config_dir_beats_built_in() {
+    let repo = Repo::new("alpha");
+    repo.write(".wteam-config/roles/worker.md", "config worker\n");
+    let json = role_json(&repo, "worker");
+    assert_eq!(json["source"], "config");
+    assert_eq!(json["text"], "config worker\n");
+}
+
+#[test]
+fn role_missing_name_fails() {
+    let repo = Repo::new("alpha");
+    repo.wteam()
+        .args(["role", "nope"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("no role prompt `nope`"));
+}
+
+#[test]
+fn planner_role_runs_pickup_with_slug() {
+    let text = include_str!("../roles/planner.md");
+    assert!(
+        text.contains("wteam pickup --slug <slug>"),
+        "roles/planner.md must run `wteam pickup --slug <slug>`"
+    );
+}
+
+#[test]
+fn skill_step_two_uses_role_planner() {
+    let md = std::fs::read_to_string(root().join("skills/wteam/SKILL.md")).unwrap();
+    assert!(
+        md.contains("wteam role planner"),
+        "SKILL.md step 2 must run `wteam role planner`"
     );
 }
 

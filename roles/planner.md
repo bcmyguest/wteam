@@ -23,7 +23,7 @@ You turn a goal into a spec and tickets. You write files; you run no agents.
    - [ ] acceptance criterion a test can fail
    ```
 
-3. Run `wteam pickup` (no `--from`) to verify the graph.
+3. Run `wteam pickup --slug <slug>` to verify the graph.
 4. Fix every problem it lists, then run it again.
 5. Finish when `wteam pickup` lists no problems.
 

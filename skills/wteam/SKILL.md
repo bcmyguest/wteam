@@ -17,16 +17,12 @@ Done when the user has answered all three and you hold the slug.
 
 Planning already happened (tickets in `.scratch/<slug>`): run `wteam pickup --from .scratch/<slug> --slug <slug>`.
 
-Otherwise spawn the planner with the brief below plus the goal and the slug. Model: sonnet (or the harness's medium model) for S and M, opus (the big model) for L.
+Otherwise spawn the planner with the prompt from `wteam role planner` (stdout; `--json` returns it as `text`), plus the goal and the slug. Model: sonnet (or the harness's medium model) for S and M, opus (the big model) for L.
 
-- Claude Code: spawn a subagent whose prompt is the brief.
-- Codex: `codex exec -m <model> "<brief>"`.
-- opencode: `opencode run -m <provider/model> "<brief>"`.
-- Any other harness: follow the brief in-session.
-
-Planner brief:
-
-> Write `spec.md` (outcome, constraints, non-goals) and `tickets/NN-<name>.md` into `.wteam/<slug>/`. Each ticket, in the `/to-tickets` format, carries `What to build`, `Blocked by`, `Status: ready-for-agent`, `Files` (the only paths its worker may edit), `Verify` (the proving command) and checkbox acceptance criteria that a test observes. Ticket 01 is a tracer bullet: the thinnest path through every layer. Tickets with overlapping `Files` block each other. On a re-plan run, read `.wteam/<slug>/queue.md` first; turn a follow-up key into a ticket on its third sighting. Finish when `wteam pickup --slug <slug>` lists no problems.
+- Claude Code: spawn a subagent whose prompt is the role prompt.
+- Codex: `codex exec -m <model> "<role prompt>"`.
+- opencode: `opencode run -m <provider/model> "<role prompt>"`.
+- Any other harness: follow the role prompt in-session.
 
 Done when `wteam pickup --slug <slug>` exits 0 with no problems listed.
 
