@@ -858,6 +858,42 @@ fn check_no_symlink(dir: &Path, extra: &str) -> Result<()> {
 
 /// Refuse an extra that another in-progress ticket's `Files:` cover. Only under `isolation = none`,
 /// where every pair shares one checkout and such a path is a real collision.
+/// `prior` extras, then the new ones not already listed: a declared extra stays committed when a
+/// resubmit omits it.
+fn union_extras(prior: &[String], new: &[String]) -> Vec<String> {
+    let mut out = prior.to_vec();
+    for e in new {
+        if !out.contains(e) {
+            out.push(e.clone());
+        }
+    }
+    out
+}
+
+/// Refuse a submit while any changed file in the working dir still has a conflict marker line.
+/// Changed means tracked and different from HEAD, or untracked. Top-level `scratch/` is ignored.
+fn check_no_markers(dir: &Path) -> Result<()> {
+    let tracked = worktree::git(dir, &["--no-optional-locks", "diff", "--name-only", "HEAD"])?;
+    let untracked = worktree::git(dir, &["ls-files", "--others", "--exclude-standard"])?;
+    let mut stuck: Vec<String> = Vec::new();
+    for f in tracked.lines().chain(untracked.lines()) {
+        if f.starts_with("scratch/") || stuck.iter().any(|s| s == f) {
+            continue;
+        }
+        let text = std::fs::read_to_string(dir.join(f)).unwrap_or_default();
+        if text
+            .lines()
+            .any(|l| l.starts_with("<<<<<<< ") || l.starts_with(">>>>>>> "))
+        {
+            stuck.push(f.to_string());
+        }
+    }
+    if !stuck.is_empty() {
+        bail!("conflict markers remain in: {}", stuck.join(", "));
+    }
+    Ok(())
+}
+
 fn check_extras(s: &State, all: &[Ticket], t: &Ticket, extras: &[String]) -> Result<()> {
     for (id, ts) in &s.tickets {
         let active = matches!(
@@ -889,10 +925,13 @@ pub fn submit(
     extras: &[String],
 ) -> Result<()> {
     let t = find_ticket(ctx, ticket)?;
-    let extras: Vec<String> = extras.iter().map(|e| e.trim().to_string()).collect();
-    extras.iter().try_for_each(|e| check_extra_path(e))?;
+    let new: Vec<String> = extras.iter().map(|e| e.trim().to_string()).collect();
+    new.iter().try_for_each(|e| check_extra_path(e))?;
+    let prior = extras_of(&crate::state::load(&ctx.paths)?, &t.id);
+    let extras = union_extras(&prior, &new);
     let dir = ticket_dir(ctx, &t.id)?;
     extras.iter().try_for_each(|e| check_no_symlink(&dir, e))?;
+    check_no_markers(&dir)?;
     let all = work::load_tickets(&ctx.paths.tickets_dir())?;
     crate::state::with_state(&ctx.paths, |s| {
         ensure_holder(s, &t.id, agent, TicketStatus::Doing)?;
@@ -1033,16 +1072,19 @@ fn advance_passed(
     }
 }
 
-/// Commit the ticket, then under worktree isolation merge it onto main. Returns the landed sha.
+/// Commit the ticket, then under worktree isolation merge it onto main. Returns the landed sha,
+/// or the conflicting paths when main moved under the ticket.
 /// Under worktree isolation the commit comes first: a failed commit leaves the worktree as the
 /// worker left it. A branch with history past its fork point (wip commits) is squashed into the
 /// one commit. Afterwards the worktree is cleaned of everything uncommitted before the merge.
-fn land(ctx: &Ctx, t: &Ticket) -> Result<String> {
+fn land(ctx: &Ctx, t: &Ticket) -> Result<worktree::MergeOutcome> {
     let st = crate::state::load(&ctx.paths)?;
     let dir = ticket_dir(ctx, &t.id)?;
     let extras = extras_of(&st, &t.id);
     if st.run.isolation != "worktree" {
-        return commit_ticket(&dir, t, &extras);
+        return Ok(worktree::MergeOutcome::Merged(commit_ticket(
+            &dir, t, &extras,
+        )?));
     }
     let base = worktree::fork_point(&ctx.paths, &t.id)?;
     let head = worktree::git(&dir, &["rev-parse", "HEAD"])?;
@@ -1081,7 +1123,10 @@ fn finish_pass(ctx: &Ctx, t: &Ticket, by: &str, notes: &[String]) -> Result<()> 
         );
     }
     let sha = match land(ctx, t) {
-        Ok(sha) => sha,
+        Ok(worktree::MergeOutcome::Merged(sha)) => sha,
+        Ok(worktree::MergeOutcome::Conflict(paths)) => {
+            return landing_conflict(ctx, t, by, &paths);
+        }
         Err(e) => return block(ctx, by, &t.id, &format!("{e:#}")),
     };
     let pair = crate::state::with_state(&ctx.paths, |s| {
@@ -1107,6 +1152,51 @@ fn finish_pass(ctx: &Ctx, t: &Ticket, by: &str, notes: &[String]) -> Result<()> 
         crate::mailbox::append_ticket(&ctx.paths, &worker, by, Some(&t.id), &body)?;
     }
     Ok(())
+}
+
+/// A passed ticket whose landing conflicted with main goes back to its pair's worker. wteam
+/// stages the ticket's work on current main as uncommitted edits with conflict markers, and the
+/// worker resolves them. Blocks at the visit cap.
+fn landing_conflict(ctx: &Ctx, t: &Ticket, by: &str, paths: &[String]) -> Result<()> {
+    let listed = paths.join(", ");
+    let max = ctx.team.max_visits;
+    let pair = crate::state::load(&ctx.paths)?
+        .tickets
+        .get(&t.id)
+        .and_then(|ts| ts.pair)
+        .with_context(|| format!("ticket {} has no pair", t.id))?;
+    let conflicts = crate::state::with_state(&ctx.paths, |s| {
+        ensure_holder(s, &t.id, by, TicketStatus::Review)?;
+        let ts = s.ticket_mut(&t.id);
+        ts.land_conflicts += 1;
+        Ok(ts.land_conflicts)
+    })?;
+    if conflicts >= max {
+        let reason = format!("landing conflicted with main {conflicts} times in: {listed}");
+        return block(ctx, by, &t.id, &reason);
+    }
+    if let Err(e) = worktree::restage_on_main(&ctx.paths, pair, &t.id) {
+        return block(ctx, by, &t.id, &format!("{e:#}"));
+    }
+    let worker = crate::team::instance_id(&dispatch_role(ctx), pair);
+    // Mail before the state flip, as in `fail_round`: the worker reads the mail on its turn.
+    let body = format!(
+        "Landing ticket {} conflicted with main in: {listed}. wteam moved your work onto current \
+         main; those files now contain conflict markers. Resolve every marker keeping both sides' \
+         intent, re-run your checks, then submit again.\n",
+        t.id
+    );
+    crate::mailbox::append_ticket(&ctx.paths, &worker, by, Some(&t.id), &body)?;
+    crate::state::with_state(&ctx.paths, |s| {
+        ensure_holder(s, &t.id, by, TicketStatus::Review)?;
+        let ts = s.ticket_mut(&t.id);
+        ts.status = TicketStatus::Doing;
+        ts.assignee = Some(worker.clone());
+        ts.passes.clear();
+        Ok(())
+    })?;
+    let transport = crate::state::load(&ctx.paths)?.run.transport;
+    crate::transport::for_name(&transport)?.deliver(ctx, &worker)
 }
 
 /// A reviewer's verdict: PASS moves the ticket along its path; FAIL returns it to the worker or blocks at the cap.

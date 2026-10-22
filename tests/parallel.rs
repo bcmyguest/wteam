@@ -55,6 +55,34 @@ git add other.txt
 wteam submit "$id" --summary "staged elsewhere"
 "#;
 
+/// Worker for the landing-conflict tests. Ticket 01 parks on `go`, ticket 02 on `go2`; both
+/// append their id to `src/shared.txt` and pass it as an extra. On a landing conflict the turn
+/// stays busy until the test writes `resolve`, then writes both lines and submits. The resolve
+/// file's content `bare` makes that submit omit `--extra`.
+const SHARED_WORKER: &str = r#"
+case "$WTEAM_PROMPT" in
+  *"Landing ticket"*)
+    i=0
+    while [ ! -f "$WTEAM_FAKE_DIR/resolve" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+    printf '01\n02\n' > src/shared.txt
+    if [ "$(cat "$WTEAM_FAKE_DIR/resolve")" = bare ]; then
+      wteam submit 02 --summary "resolved"
+    else
+      wteam submit 02 --summary "resolved" --extra src/shared.txt
+    fi
+    exit 0 ;;
+esac
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+gate=go
+[ "$id" = "02" ] && gate=go2
+i=0
+while [ ! -f "$WTEAM_FAKE_DIR/$gate" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+mkdir -p src
+echo "$id" >> src/shared.txt
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id" --extra src/shared.txt
+"#;
+
 /// Worktree isolation with `pairs` pairs and the default team; the orchestrator never dispatches.
 fn repo_with_pairs(pairs: u32) -> Repo {
     let r = Repo::new("demo");
@@ -167,25 +195,182 @@ fn worktree_merges_land_in_order_and_worktrees_are_removed() {
     assert!(r.git(&["branch", "--list", "wteam/*"]).trim().is_empty());
 }
 
+/// Git in a worktree directory.
+fn wt_git(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// Dispatch 01 and 02 to separate pairs and land 01, so 02's branch sits on the old base.
+fn dispatch_and_land_01(r: &Repo) {
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wteam().args(["dispatch", "02"]).assert().success();
+    r.wait_for(60, |s| {
+        s["tickets"]["01"]["status"] == "doing" && s["tickets"]["02"]["status"] == "doing"
+    });
+    go(r);
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+}
+
+/// Release worker 02, whose landing then conflicts with 01 on `src/shared.txt`.
+fn release_02(r: &Repo) {
+    r.write(".wteam-fake/go2", "");
+}
+
+/// Let the conflicted worker resolve its markers and submit.
+fn release_resolve(r: &Repo) {
+    r.write(".wteam-fake/resolve", "");
+}
+
 #[test]
-fn conflicting_worktree_merge_blocks_ticket_and_leaves_main_alone() {
+fn landing_conflict_returns_the_ticket_to_its_worker_with_markers_on_main() {
+    let r = repo();
+    r.agent_script("worker", SHARED_WORKER);
+    dispatch_and_land_01(&r);
+    release_02(&r);
+
+    let s = r.wait_for(60, |s| {
+        s["tickets"]["02"]["status"] == "doing" && s["tickets"]["02"]["land_conflicts"] == 1
+    });
+    assert_eq!(s["tickets"]["02"]["assignee"], "worker.2");
+    let mail = r.read(".wteam/demo/mail/worker.2.md");
+    assert!(
+        mail.contains("Landing ticket 02 conflicted with main in: src/shared.txt"),
+        "{mail}"
+    );
+    let wt = r.path().join(".wteam/demo/worktrees/pair2");
+    assert_eq!(
+        wt_git(&wt, &["rev-parse", "HEAD"]),
+        r.git(&["rev-parse", "HEAD"])
+    );
+    let shared = std::fs::read_to_string(wt.join("src/shared.txt")).unwrap();
+    assert!(
+        shared.contains("<<<<<<< ") && shared.contains(">>>>>>> "),
+        "{shared}"
+    );
+    assert!(shared.contains("01"), "{shared}");
+    assert_eq!(r.read("src/shared.txt"), "01\n");
+
+    release_resolve(&r);
+    r.wait_for(60, |s| s["tickets"]["02"]["status"] == "done");
+    assert_eq!(r.read("src/shared.txt"), "01\n02\n");
+    assert!(r.read("src/02.txt").contains("edit"));
+}
+
+#[test]
+fn submit_refuses_while_a_changed_file_has_conflict_markers() {
+    let r = repo();
+    r.agent_script("worker", SHARED_WORKER);
+    dispatch_and_land_01(&r);
+    release_02(&r);
+    let before = r.wait_for(60, |s| s["tickets"]["02"]["land_conflicts"] == 1);
+
+    // The resubmit omits the conflicted extra; it is still in the ticket's scope.
+    r.wteam()
+        .env("WTEAM_AGENT", "worker.2")
+        .args(["submit", "02", "--summary", "still conflicted"])
+        .assert()
+        .failure()
+        .stderr(contains("src/shared.txt"));
+    assert_eq!(r.state()["tickets"]["02"], before["tickets"]["02"]);
+
+    release_resolve(&r);
+    r.wait_for(60, |s| s["tickets"]["02"]["status"] == "done");
+}
+
+#[test]
+fn resubmit_without_extra_still_lands_the_declared_extra() {
+    let r = repo();
+    r.agent_script("worker", SHARED_WORKER);
+    dispatch_and_land_01(&r);
+    release_02(&r);
+    r.wait_for(60, |s| s["tickets"]["02"]["land_conflicts"] == 1);
+
+    r.write(".wteam-fake/resolve", "bare");
+    r.wait_for(60, |s| s["tickets"]["02"]["status"] == "done");
+    assert_eq!(r.read("src/shared.txt"), "01\n02\n");
+}
+
+#[test]
+fn submit_checks_untracked_files_but_ignores_scratch() {
+    let r = repo();
+    r.agent_script("worker", WORKER);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "doing");
+    let wt = r.path().join(".wteam/demo/worktrees/pair1");
+
+    std::fs::create_dir_all(wt.join("notes")).unwrap();
+    std::fs::write(wt.join("notes/todo.txt"), "<<<<<<< mine\n").unwrap();
+    r.wteam()
+        .env("WTEAM_AGENT", "worker.1")
+        .args(["submit", "01", "--summary", "x"])
+        .assert()
+        .failure()
+        .stderr(contains("notes/todo.txt"));
+
+    std::fs::remove_file(wt.join("notes/todo.txt")).unwrap();
+    std::fs::create_dir_all(wt.join("scratch")).unwrap();
+    std::fs::write(wt.join("scratch/notes.txt"), "<<<<<<< mine\n").unwrap();
+    r.wteam()
+        .env("WTEAM_AGENT", "worker.1")
+        .args(["submit", "01", "--summary", "x"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn landing_conflict_blocks_at_max_visits_naming_the_paths() {
+    let r = repo();
+    r.write(
+        ".wteam/team.dot",
+        r#"digraph default {
+  graph [max_visits=1]
+  orchestrator [agent="orchestrator"]
+  worker       [agent="worker", count="$pairs"]
+  reviewer     [agent="reviewer", count="$pairs"]
+  orchestrator -> worker   [on=dispatch, kind=broadcast]
+  worker -> reviewer       [on=submit, kind=pair]
+  reviewer -> worker       [on=fail, kind=pair]
+  reviewer -> orchestrator [on=pass, kind=fan-in]
+  worker -> orchestrator   [on=blocked, kind=fan-in]
+}
+"#,
+    );
+    r.agent_script("worker", SHARED_WORKER);
+    dispatch_and_land_01(&r);
+    release_02(&r);
+
+    let s = r.wait_for(60, |s| s["tickets"]["02"]["status"] == "blocked");
+    let reason = s["tickets"]["02"]["blocked_reason"].as_str().unwrap();
+    assert!(reason.contains("src/shared.txt"), "{reason}");
+}
+
+#[test]
+fn non_conflict_merge_failure_still_blocks_the_ticket() {
     let r = repo();
     r.ticket("01", "Add one", "None", "src/01.txt", "");
     r.wteam().args(["dispatch", "01"]).assert().success();
     r.wait_for(60, |s| s["tickets"]["01"]["status"] == "doing");
 
-    // Main gains the same file while the worker's branch is still on the old base.
-    r.write("src/01.txt", "main\n");
-    r.git(&["add", "src/01.txt"]);
-    r.git(&["commit", "-q", "-m", "chore: main edit"]);
-    let main_head = r.git(&["rev-parse", "HEAD"]);
+    // An untracked file in main that the merge would create: git refuses, no rebase conflict.
+    r.write("src/01.txt", "untracked in main\n");
     go(&r);
-
     let s = r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
     let reason = s["tickets"]["01"]["blocked_reason"].as_str().unwrap();
-    assert!(reason.contains("src/01.txt"), "{reason}");
-    assert_eq!(r.git(&["rev-parse", "HEAD"]), main_head);
-    assert!(!r.git(&["log", "--format=%s"]).contains("(wteam 01)"));
+    assert!(reason.contains("overwritten"), "{reason}");
 }
 
 #[test]

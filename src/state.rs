@@ -60,6 +60,9 @@ pub struct TicketState {
     pub commit: Option<String>,
     #[serde(default)]
     pub blocked_reason: Option<String>,
+    /// Landings that conflicted with main and went back to the worker. Blocks at `max_visits`.
+    #[serde(default)]
+    pub land_conflicts: u32,
     #[serde(default)]
     pub last_verdict: Option<Verdict>,
     /// Reviewer roles that passed this round. Cleared on FAIL, failed check and dispatch.

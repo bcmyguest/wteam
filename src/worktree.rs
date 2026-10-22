@@ -151,34 +151,46 @@ pub fn fork_point(paths: &Paths, ticket: &str) -> Result<String> {
         .to_string())
 }
 
+/// Result of [`merge_back`]: landed at the new main sha, or the paths that conflict with main.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MergeOutcome {
+    Merged(String),
+    Conflict(Vec<String>),
+}
+
+/// Paths with unresolved conflicts in `dir`.
+fn unmerged(dir: &Path) -> Result<Vec<String>> {
+    Ok(git(
+        dir,
+        &[
+            "--no-optional-locks",
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+        ],
+    )?
+    .lines()
+    .map(str::to_string)
+    .collect())
+}
+
 /// Rebase the ticket branch onto the main tree's HEAD and fast-forward it in.
-/// A rebase conflict aborts the rebase and names the conflicting paths; main is untouched.
-/// On success removes the worktree and branch and returns the new main HEAD sha.
-pub fn merge_back(paths: &Paths, pair: u32, ticket: &str) -> Result<String> {
+/// A rebase conflict aborts the rebase and returns [`MergeOutcome::Conflict`] with the paths;
+/// main is untouched. Any other failure is an error. On success removes the worktree and
+/// branch and returns the new main HEAD sha.
+pub fn merge_back(paths: &Paths, pair: u32, ticket: &str) -> Result<MergeOutcome> {
     let _lock = lock(paths)?;
     let dir = path(paths, pair);
     let branch = branch(&paths.slug, ticket);
     let base = git(&paths.root, &["rev-parse", "HEAD"])?.trim().to_string();
     if let Err(e) = git(&dir, &["rebase", &base]) {
-        let conflicts = git(
-            &dir,
-            &[
-                "--no-optional-locks",
-                "diff",
-                "--name-only",
-                "--diff-filter=U",
-            ],
-        )
-        .unwrap_or_default();
+        let conflicts = unmerged(&dir);
         let _ = git(&dir, &["rebase", "--abort"]);
-        let paths_list: Vec<&str> = conflicts.lines().collect();
-        if paths_list.is_empty() {
+        let conflicts = conflicts?;
+        if conflicts.is_empty() {
             bail!("rebase of {branch} onto main failed: {e:#}");
         }
-        bail!(
-            "rebase of {branch} onto main conflicts in: {}",
-            paths_list.join(", ")
-        );
+        return Ok(MergeOutcome::Conflict(conflicts));
     }
     git(&paths.root, &["merge", "--ff-only", &branch])?;
     let sha = git(&paths.root, &["rev-parse", "HEAD"])?.trim().to_string();
@@ -187,5 +199,30 @@ pub fn merge_back(paths: &Paths, pair: u32, ticket: &str) -> Result<String> {
         &["worktree", "remove", "--force", &dir.to_string_lossy()],
     )?;
     git(&paths.root, &["branch", "-D", &branch])?;
-    Ok(sha)
+    Ok(MergeOutcome::Merged(sha))
+}
+
+/// After a landing conflict: move pair `pair`'s ticket work onto main's HEAD as uncommitted
+/// edits. The ticket branch (one squashed commit) is reset to main, then its commit is
+/// cherry-picked without committing, so conflicting files hold the usual markers. Main is never
+/// touched.
+pub fn restage_on_main(paths: &Paths, pair: u32, ticket: &str) -> Result<()> {
+    let _lock = lock(paths)?;
+    let dir = path(paths, pair);
+    let branch = branch(&paths.slug, ticket);
+    let current = git(&dir, &["branch", "--show-current"])?.trim().to_string();
+    if current != branch {
+        bail!("pair {pair} is on {current}, not {branch}");
+    }
+    let ticket_sha = git(&dir, &["rev-parse", "HEAD"])?.trim().to_string();
+    let base = git(&paths.root, &["rev-parse", "HEAD"])?.trim().to_string();
+    git(&dir, &["reset", "--hard", &base])?;
+    // The pick stops on conflicts by design; only a pick that fails without them is an error.
+    if let Err(e) = git(&dir, &["cherry-pick", "--no-commit", &ticket_sha])
+        && unmerged(&dir)?.is_empty()
+    {
+        bail!("restaging {ticket} on main failed: {e:#}");
+    }
+    git(&dir, &["reset", "-q"])?;
+    Ok(())
 }
