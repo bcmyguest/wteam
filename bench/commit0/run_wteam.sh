@@ -26,6 +26,7 @@ if [ "${CODEGRAPH:-0}" = 1 ]; then
   done
   CG=cg-
   codegraph init . >/dev/null 2>&1
+  mkdir -p .git/info
   printf '.codegraph/\n' >> .git/info/exclude
 fi
 mkdir -p .wteam/agents
