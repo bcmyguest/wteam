@@ -1,7 +1,6 @@
 # wteam
 
 [![CI](https://github.com/bcmyguest/wteam/actions/workflows/ci.yml/badge.svg)](https://github.com/bcmyguest/wteam/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/wteam.svg)](https://crates.io/crates/wteam)
 
 Portable worker/reviewer teams for coding agents (Claude Code, Codex, opencode, Cursor).
 
@@ -12,34 +11,27 @@ through append-only mailboxes under `.wteam/`. Documentation site:
 
 ## Install
 
-```bash
-cargo install wteam --locked
-```
-
-Or grab a static binary from the
-[latest release](https://github.com/bcmyguest/wteam/releases/latest):
-`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
-`aarch64-apple-darwin`, or `x86_64-apple-darwin`.
+macOS and Linux (including WSL), from the latest GitHub release:
 
 ```bash
-case "$(uname -sm)" in
-  "Linux x86_64")   target=x86_64-unknown-linux-musl ;;
-  "Linux aarch64")  target=aarch64-unknown-linux-musl ;;
-  "Darwin arm64")   target=aarch64-apple-darwin ;;
-  "Darwin x86_64")  target=x86_64-apple-darwin ;;
-esac
-curl -fsSL -o ~/.local/bin/wteam \
-  "https://github.com/bcmyguest/wteam/releases/latest/download/wteam-$target"
-chmod +x ~/.local/bin/wteam
+curl -fsSL https://raw.githubusercontent.com/bcmyguest/wteam/main/install.sh | sh
 ```
 
-Or build from source:
+The script picks the static binary for your platform (`x86_64`/`aarch64` Linux
+musl, Apple Silicon or Intel macOS), verifies it against `checksums.txt`, and
+installs it to `~/.local/bin` (override with `WTEAM_INSTALL_DIR`; pin a release
+with `WTEAM_VERSION=v0.1.0`). If an authenticated `gh` is available the script
+downloads through it; otherwise it uses curl. From a clone: `sh install.sh`.
+
+From source (any platform with Rust):
 
 ```bash
-git clone https://github.com/bcmyguest/wteam
-cd wteam
-cargo build --release   # binary at target/release/wteam
+cargo install --git https://github.com/bcmyguest/wteam --locked
 ```
+
+wteam is not published to crates.io.
+
+The agent skill installs separately: `npx skills add bcmyguest/wteam`.
 
 ## Quickstart
 
@@ -203,4 +195,4 @@ hand; the workflow stamps the tag version in at build time.
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0. See [LICENSE](LICENSE).

@@ -3,13 +3,17 @@ title: Quickstart
 description: Initialise an effort, check its tickets and drive one ticket through review.
 ---
 
-Requirements: a git repository, and Rust for a source build.
+Requirements: a git repository on macOS or Linux (WSL works).
 
 ## Install
 
 ```bash
-cargo install wteam --locked
+curl -fsSL https://raw.githubusercontent.com/bcmyguest/wteam/main/install.sh | sh
 ```
+
+The script installs the release binary for your platform into `~/.local/bin` after
+checking its SHA-256.
+From a clone: `sh install.sh`.
 
 Or build from a checkout:
 

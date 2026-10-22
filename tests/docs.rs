@@ -8,6 +8,7 @@ use assert_cmd::cargo::cargo_bin;
 
 /// Flags README shows for other tools (cargo, pre-commit). Not wteam flags.
 const OTHER_TOOLS: &[&str] = &[
+    "--git",
     "--locked",
     "--release",
     "--all-targets",
