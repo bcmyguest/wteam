@@ -22,8 +22,8 @@ Run `wteam permissions` to print the current matrix. Filter with
 | Profile | Allow | Ask | Deny |
 |---|---|---|---|
 | `control` | `Bash(wteam *)`, `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Read(**)` | | `Edit(**)` |
-| `review` | `Read(**)`, `Bash(wteam *)`, `Bash(git diff *)`, `Bash(git log *)`, test runners (`cargo test`, `npm test`, `pytest`, `python3 -m pytest`, `go test`, `make test`, `make check`) | | `Edit(**)` |
-| `edit` | `Read(**)`, `Edit(**)`, `Bash(wteam *)`, `Bash(git diff *)`, `Bash(git status *)`, `Bash(cargo *)`, `Bash(npm *)`, `Bash(pytest *)`, the test runners above | `Bash(git push *)` | `Read(**/.env)`, `Bash(rm -rf *)` |
+| `review` | `Read(**)`, `Bash(wteam *)`, `Bash(git diff *)`, `Bash(git log *)`, toolchains (`python3 *`, `python *`, `node *`, `go *`, `cargo *`, `npm *`, `pytest *`), test runners (`cargo test`, `npm test`, `python3 -m pytest`, `go test`, `make test`, `make check`) | | `Edit(**)` |
+| `edit` | `Read(**)`, `Edit(**)`, `Bash(wteam *)`, `Bash(git diff *)`, `Bash(git status *)`, `Bash(python3 *)`, `Bash(python *)`, `Bash(node *)`, `Bash(go *)`, `Bash(cargo *)`, `Bash(npm *)`, `Bash(pytest *)`, the test runners above | `Bash(git push *)` | `Read(**/.env)`, `Bash(rm -rf *)` |
 | `full` | bypass all permissions | | |
 
 ## Translation per CLI

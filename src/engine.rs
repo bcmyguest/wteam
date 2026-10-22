@@ -1124,25 +1124,52 @@ fn fail_round(
     crate::transport::for_name(&transport)?.deliver(ctx, worker)
 }
 
-/// Mark `ticket` blocked with `reason` and tell the orchestrator.
+/// Whether `agent` may block `ticket` now: it holds the ticket, or it is the orchestrator or a
+/// human, and the ticket is in progress.
+fn check_blockable(s: &State, ticket: &str, agent: &str, role: &str) -> Result<()> {
+    let ts = s.tickets.get(ticket);
+    let holder = ts.and_then(|ts| ts.assignee.as_deref()) == Some(agent);
+    if !holder && role != "orchestrator" && agent != "human" {
+        bail!("ticket {ticket} is not held by {agent}");
+    }
+    if matches!(
+        ts.map(|ts| ts.status),
+        None | Some(TicketStatus::Done | TicketStatus::Todo)
+    ) {
+        bail!("ticket {ticket} is not in progress");
+    }
+    Ok(())
+}
+
+/// Mark `ticket` blocked with `reason` and tell the orchestrator. Under worktree isolation the
+/// pair's uncommitted work is first committed to the ticket's branch as a wip commit, so the
+/// pair is reusable at once. A failed commit leaves the pair dirty and the orchestrator is told.
 pub fn block(ctx: &Ctx, agent: &str, ticket: &str, reason: &str) -> Result<()> {
     let t = find_ticket(ctx, ticket)?;
     let (role, _) = parse_instance(agent);
+    let s = crate::state::load(&ctx.paths)?;
+    check_blockable(&s, &t.id, agent, &role)?;
+    let mut kept = None;
+    if s.run.isolation == "worktree"
+        && let Some(pair) = s.tickets.get(&t.id).and_then(|ts| ts.pair)
+        && let Err(e) = worktree::preserve(&ctx.paths, pair, &t.id, &t.title)
+    {
+        kept = Some((pair, format!("{e:#}")));
+    }
     crate::state::with_state(&ctx.paths, |s| {
+        check_blockable(s, &t.id, agent, &role)?;
         let ts = s.ticket_mut(&t.id);
-        let holder = ts.assignee.as_deref() == Some(agent);
-        if !holder && role != "orchestrator" && agent != "human" {
-            bail!("ticket {} is not held by {agent}", t.id);
-        }
-        if matches!(ts.status, TicketStatus::Done | TicketStatus::Todo) {
-            bail!("ticket {} is not in progress", t.id);
-        }
         ts.status = TicketStatus::Blocked;
         ts.blocked_reason = Some(reason.to_string());
         s.push_event(EventKind::Blocked, Some(&t.id), Some(agent), reason);
         Ok(())
     })?;
-    let note = format!("Ticket {} blocked by {agent}: {reason}", t.id);
+    let mut note = format!("Ticket {} blocked by {agent}: {reason}", t.id);
+    if let Some((pair, err)) = kept {
+        note.push_str(&format!(
+            "\nUncommitted work left in pair {pair}, not preserved: {err}"
+        ));
+    }
     crate::mailbox::append_ticket(&ctx.paths, "orchestrator.1", agent, Some(&t.id), &note)?;
     Ok(())
 }

@@ -197,6 +197,7 @@ fn dirty_pair_is_skipped_by_auto_pick_and_reported() {
     r.ticket("02", "Add two", "None", "src/02.txt", "");
     r.wteam().args(["dispatch", "01"]).assert().success();
     r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+    r.write(".wteam/demo/worktrees/pair1/src/stray.txt", "left behind");
     go(&r);
 
     r.wteam().args(["dispatch", "02"]).assert().success();
@@ -227,12 +228,61 @@ fn auto_dispatch_refuses_when_every_idle_pair_is_dirty() {
     r.ticket("02", "Add two", "None", "src/02.txt", "");
     r.wteam().args(["dispatch", "01"]).assert().success();
     r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+    r.write(".wteam/demo/worktrees/pair1/src/stray.txt", "left behind");
 
     r.wteam()
         .args(["dispatch", "02"])
         .assert()
         .failure()
         .stderr(contains("dirty: pair 1"));
+}
+
+#[test]
+fn blocked_work_is_committed_to_its_branch_and_pair_is_reused() {
+    let r = repo_with_pairs(1);
+    r.agent_script("worker", STUCK_WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+
+    let pair = ".wteam/demo/worktrees/pair1";
+    assert_eq!(r.git(&["-C", pair, "status", "--porcelain"]), "");
+    assert_eq!(
+        r.git(&["log", "-1", "--format=%s", "wteam/demo/01"]).trim(),
+        "wip: Add one (wteam 01, blocked)"
+    );
+    assert!(
+        r.git(&["ls-tree", "-r", "--name-only", "wteam/demo/01"])
+            .contains("src/wip.txt")
+    );
+
+    go(&r);
+    r.wteam().args(["dispatch", "02"]).assert().success();
+    let s = r.wait_for(60, |s| s["tickets"]["02"]["status"] == "done");
+    assert_eq!(s["tickets"]["02"]["pair"], 1);
+}
+
+#[test]
+fn requeued_ticket_resumes_on_its_preserved_branch() {
+    let r = repo_with_pairs(1);
+    r.agent_script("worker", STUCK_WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+
+    r.agent_script("worker", WORKER);
+    r.wteam().args(["requeue", "01"]).assert().success();
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    assert!(
+        r.path()
+            .join(".wteam/demo/worktrees/pair1/src/wip.txt")
+            .exists()
+    );
+    go(&r);
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
 }
 
 #[test]

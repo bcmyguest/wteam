@@ -174,6 +174,12 @@ pub fn builtin(name: &str) -> Option<Profile> {
                 "Bash(go test *)",
                 "Bash(make test)",
                 "Bash(make check)",
+                "Bash(python3 *)",
+                "Bash(python *)",
+                "Bash(node *)",
+                "Bash(go *)",
+                "Bash(cargo *)",
+                "Bash(npm *)",
             ],
             &[],
             &["Edit(**)"],
@@ -201,6 +207,10 @@ pub fn builtin(name: &str) -> Option<Profile> {
                 "Bash(go test *)",
                 "Bash(make test)",
                 "Bash(make check)",
+                "Bash(python3 *)",
+                "Bash(python *)",
+                "Bash(node *)",
+                "Bash(go *)",
             ],
             &["Bash(git push *)"],
             &["Read(**/.env)", "Bash(rm -rf *)"],
@@ -380,6 +390,25 @@ mod tests {
             assert_eq!(render_rule(&parse_rule(s).unwrap()), s);
         }
         assert_eq!(parse_rule("Read").unwrap(), Rule::Tool("Read".into()));
+    }
+
+    #[test]
+    fn interpreter_rules_let_agents_self_check() {
+        let rules = [
+            "Bash(python3 *)",
+            "Bash(python *)",
+            "Bash(node *)",
+            "Bash(go *)",
+            "Bash(cargo *)",
+            "Bash(npm *)",
+            "Bash(pytest *)",
+        ];
+        for name in ["review", "edit"] {
+            let p = builtin(name).unwrap();
+            for rule in rules {
+                assert!(p.allow.iter().any(|a| a == rule), "{name} lacks {rule}");
+            }
+        }
     }
 
     #[test]

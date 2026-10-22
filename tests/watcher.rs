@@ -208,6 +208,35 @@ if [ -f "$WTEAM_FAKE_DIR/handoffs-asked" ]; then echo "tokens: 1000"; else echo 
 }
 
 #[test]
+fn all_idle_pairs_dirty_stops_with_dirty_reason() {
+    let r = Repo::new("demo");
+    r.ticket("01", "Ticket one", "None", "src/01.txt", "");
+    r.use_fake_agents();
+    r.agent_script("orchestrator", "true\n");
+    r.agent_script("worker", WORKER);
+    r.agent_script("reviewer", REVIEWER);
+    // Pair 1 holds uncommitted work from an earlier ticket.
+    let pair = r.path().join(".wteam/demo/worktrees/pair1");
+    r.git(&[
+        "worktree",
+        "add",
+        "-b",
+        "wteam/demo/zz",
+        pair.to_str().unwrap(),
+        "HEAD",
+    ]);
+    r.write(".wteam/demo/worktrees/pair1/stray.txt", "left behind");
+
+    let text = run_ok(&r, &["--pairs", "1", "--isolation", "worktree"]);
+
+    assert!(
+        text.contains("Run stopped: no usable pair: dirty worktrees on pair 1."),
+        "{text}"
+    );
+    assert!(!text.contains("did not dispatch"), "{text}");
+}
+
+#[test]
 fn undispatched_ready_tickets_stop_after_two_idle_turns() {
     let r = Repo::new("demo");
     r.ticket("01", "Ticket one", "None", "src/01.txt", "");

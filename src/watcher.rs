@@ -18,6 +18,7 @@ use crate::team::agents::{self, AgentDef};
 use crate::team::{NodeKind, parse_instance};
 use crate::transport::resume;
 use crate::work;
+use crate::worktree;
 
 /// Poll interval while waiting for agents.
 const POLL: Duration = Duration::from_millis(200);
@@ -106,9 +107,16 @@ fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
             continue;
         }
         let undispatched = dispatchable_ready(ctx)?;
-        let idle_pairs = idle_pairs(ctx)?;
+        let (idle_pairs, dirty) = idle_pairs(ctx)?;
         // A spent budget means no re-prompt: the await below lets in-flight work finish and stops.
         let budget_spent = over_budget(&state::load(&ctx.paths)?).is_some();
+        if !undispatched.is_empty() && !budget_spent && idle_pairs == 0 && !dirty.is_empty() {
+            let list: Vec<String> = dirty.iter().map(|n| format!("pair {n}")).collect();
+            return Ok(format!(
+                "no usable pair: dirty worktrees on {}",
+                list.join(", ")
+            ));
+        }
         if !undispatched.is_empty() && idle_pairs > 0 && !budget_spent {
             // A turn that started a ticket made progress; only a turn that started none is idle.
             idle_turns = if dispatched { 0 } else { idle_turns + 1 };
@@ -194,16 +202,26 @@ fn doing_ids(ctx: &Ctx) -> Result<BTreeSet<String>> {
         .collect())
 }
 
-/// Pairs with no ticket in progress.
-fn idle_pairs(ctx: &Ctx) -> Result<u32> {
+/// Usable idle pairs, and the idle pairs that hold uncommitted work. A dirty pair is not idle:
+/// dispatch skips it, so it cannot take a ticket.
+fn idle_pairs(ctx: &Ctx) -> Result<(u32, Vec<u32>)> {
     let s = state::load(&ctx.paths)?;
-    let busy: std::collections::BTreeSet<u32> = s
+    let busy: BTreeSet<u32> = s
         .tickets
         .values()
         .filter(|t| matches!(t.status, TicketStatus::Doing | TicketStatus::Review))
         .filter_map(|t| t.pair)
         .collect();
-    Ok(s.run.pairs.saturating_sub(busy.len() as u32))
+    let idle: Vec<u32> = (1..=s.run.pairs).filter(|n| !busy.contains(n)).collect();
+    let dirty: Vec<u32> = if s.run.isolation == "worktree" {
+        idle.iter()
+            .copied()
+            .filter(|n| worktree::dirty(&ctx.paths, *n))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(((idle.len() - dirty.len()) as u32, dirty))
 }
 
 /// True when the orchestrator's last context size passed its handoff threshold.

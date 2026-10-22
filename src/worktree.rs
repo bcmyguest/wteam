@@ -76,6 +76,28 @@ pub fn dirty_pairs(paths: &Paths, pairs: u32) -> Vec<u32> {
     (1..=pairs).filter(|n| dirty(paths, *n)).collect()
 }
 
+/// Commit pair `pair`'s uncommitted work as a wip commit on the ticket's branch, so the
+/// worktree is clean and reusable. Returns `false` when there was nothing to commit.
+/// Fails when the pair is not on the ticket's branch.
+pub fn preserve(paths: &Paths, pair: u32, ticket: &str, title: &str) -> Result<bool> {
+    let dir = path(paths, pair);
+    let branch = branch(&paths.slug, ticket);
+    let current = git(&dir, &["branch", "--show-current"])?.trim().to_string();
+    if current != branch {
+        bail!("pair {pair} is on {current}, not {branch}");
+    }
+    if git(&dir, &["--no-optional-locks", "status", "--porcelain"])?
+        .trim()
+        .is_empty()
+    {
+        return Ok(false);
+    }
+    git(&dir, &["add", "-A"])?;
+    let msg = format!("wip: {title} (wteam {ticket}, blocked)");
+    git(&dir, &["commit", "--no-verify", "-m", &msg])?;
+    Ok(true)
+}
+
 /// Create (or reuse) pair `pair`'s worktree on branch `wteam/<slug>/<ticket>`.
 /// A new branch starts at the main tree's HEAD. A worktree that still holds another
 /// ticket's uncommitted work is refused; a clean one is removed first.

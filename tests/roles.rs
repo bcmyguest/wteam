@@ -96,6 +96,20 @@ fn worker_and_reviewer_run_one_command_per_shell_call() {
 }
 
 #[test]
+fn worker_and_reviewer_keep_scratch_in_repo() {
+    for name in ["worker", "reviewer"] {
+        assert_mentions(
+            name,
+            &[
+                "`scratch/`",
+                "Never write to `/tmp`",
+                "Never submit `scratch/`",
+            ],
+        );
+    }
+}
+
+#[test]
 fn reviewer_names_its_commands() {
     assert_mentions(
         "reviewer",

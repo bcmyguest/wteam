@@ -125,3 +125,17 @@ fn json_returns_support_data() {
     assert_eq!(push["support"]["cursor"]["support"], "lossy");
     assert_eq!(push["support"]["claude"]["support"], "exact");
 }
+
+#[test]
+fn edit_profile_shows_interpreter_rules() {
+    let r = Repo::new("demo");
+    let out = r
+        .wteam()
+        .args(["permissions", "--profile", "edit", "--cli", "claude"])
+        .assert()
+        .success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    for rule in ["python3 *", "python *", "node *", "go *"] {
+        assert!(text.contains(rule), "edit lacks {rule}: {text}");
+    }
+}

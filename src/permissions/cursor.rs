@@ -98,7 +98,11 @@ mod tests {
       "Shell(python3 -m pytest *)",
       "Shell(go test *)",
       "Shell(make test)",
-      "Shell(make check)"
+      "Shell(make check)",
+      "Shell(python3 *)",
+      "Shell(python *)",
+      "Shell(node *)",
+      "Shell(go *)"
     ],
     "deny": [
       "Shell(git push *)",
@@ -109,7 +113,7 @@ mod tests {
 }
 "#
         );
-        assert_eq!(t.support.len(), 24);
+        assert_eq!(t.support.len(), 28);
         let ask = t
             .support
             .iter()
@@ -124,7 +128,7 @@ mod tests {
                 .iter()
                 .filter(|s| s.support == Support::Exact)
                 .count(),
-            23
+            27
         );
     }
 

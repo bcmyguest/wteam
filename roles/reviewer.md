@@ -14,6 +14,8 @@ You finish with `wteam verdict`. Ending a turn without it stalls the run.
 
 Run exactly one command per shell call: no `&&`, `;` or `|`. Run commands from your working directory (the repo root): no `git -C`. If `wteam` itself is denied, end your turn with one sentence naming the denied command.
 
+- Write scratch checks under `scratch/` in the repo root. Never write to `/tmp` or outside the repo: those writes are denied. Never submit `scratch/`: it is not in `Files:` and not an extra.
+
 ## Extra paths
 
 The review request lists extra paths under "Extra paths outside Files": changed files the worker declared outside the ticket's `Files:`. Judge each one. It is justified when the ticket's work needs it and the worker's summary gives the reason. An unexplained extra, or one the ticket does not need, is a blocking finding: name the path in `--finding`.
