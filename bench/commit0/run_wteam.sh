@@ -4,7 +4,8 @@
 # Run outputs (plan, pickup, run, metrics, grade) go to <work dir>.logs, outside the repo.
 # Env: CODEGRAPH=1 gives agents a code index; OVERLAP=allow lets tickets that share files run at once;
 #   SHAPE=coupled keeps coupled classes in one ticket and adds a final integration ticket;
-#   RUN_TIMEOUT caps the run in seconds (default 1800).
+#   RUN_TIMEOUT caps the run in seconds (default 1800);
+#   REVIEW=off swaps the reviewer for one that passes every ticket at once (an ablation).
 #   sh run_wteam.sh <lib> <work dir> <planner model> <worker model> <reviewer model> <pairs>
 set -u
 command -v wteam >/dev/null || { echo "wteam not on PATH" >&2; exit 1; }
@@ -29,11 +30,15 @@ if [ "${CODEGRAPH:-0}" = 1 ]; then
   mkdir -p .git/info
   printf '.codegraph/\n' >> .git/info/exclude
 fi
-mkdir -p .wteam/agents
+mkdir -p .wteam/agents .wteam/roles
 for spec in planner:$PLANNER:${CG:-}plan orchestrator:$WORKER:${CG:-}control worker:$WORKER:${CG:-}edit reviewer:$REVIEWER:${CG:-}review; do
   r=${spec%%:*}; rest=${spec#*:}; m=${rest%%:*}; p=${rest#*:}
   printf 'name = "%s"\ncli = "claude"\nmodel = "%s"\nprompt = "%s"\nprofile = "%s"\n' "$r" "$m" "$r" "$p" > ".wteam/agents/$r.toml"
 done
+if [ "${REVIEW:-on}" = off ]; then
+  printf '# autopass reviewer\n\nYou are a stand-in reviewer. For the ticket named in your message, run exactly one command, `wteam verdict NN pass` with NN the ticket id, and end your turn. Read nothing else.\n' > .wteam/roles/autopass.md
+  printf 'name = "reviewer"\ncli = "claude"\nmodel = "haiku"\nprompt = "autopass"\nprofile = "%sreview"\n' "${CG:-}" > .wteam/agents/reviewer.toml
+fi
 start=$(date +%s)
 # 1. Plan: the planner role prompt plus the goal; tickets must pass `wteam pickup`.
 PLAN_PROMPT="$(wteam role planner)

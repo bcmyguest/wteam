@@ -2,6 +2,7 @@
 # Baseline: ONE headless Claude Code session rebuilds the whole library.
 # Run outputs go to <work dir>.logs, outside the repo.
 #   sh run_single.sh <lib> <work dir> <model>
+# Env: PLAN=<dir> hands the session a saved plan (spec.md + tickets) to work through in order.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 LIB="$1"; DIR="$2"; MODEL="$3"
@@ -9,8 +10,15 @@ sh "$HERE/prepare.sh" "$LIB" "$DIR" >/dev/null
 LOGS="${DIR%/}.logs"; rm -rf "$LOGS"; mkdir -p "$LOGS"; touch "$LOGS/.start"
 cd "$DIR"
 . "$HERE/goal.sh"
+PROMPT="$GOAL Work until every stub is implemented, then report what you checked."
+if [ -n "${PLAN:-}" ]; then
+  PROMPT="$PROMPT
+
+Follow this plan: work through the tickets one at a time, each only after its Blocked-by tickets.
+$(for f in "$PLAN"/spec.md "$PLAN"/[0-9]*.md; do printf '\n----- %s -----\n' "$(basename "$f")"; cat "$f"; done)"
+fi
 start=$(date +%s)
-timeout 7200 claude -p "$GOAL Work until every stub is implemented, then report what you checked." \
+timeout 7200 claude -p "$PROMPT" \
   --model "$MODEL" --output-format json \
   --setting-sources project,local --disable-slash-commands \
   --permission-mode dontAsk \
