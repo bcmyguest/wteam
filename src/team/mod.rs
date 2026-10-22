@@ -133,6 +133,9 @@ pub struct Team {
     pub max_visits: u32,
     /// Orchestrator context size that triggers a handoff.
     pub handoff_tokens: u64,
+    /// A worker or reviewer keeps its session across tickets until its context reaches this many
+    /// tokens; a new ticket then starts a fresh session. 0 starts every ticket fresh.
+    pub session_tokens: u64,
 }
 
 impl Team {
@@ -187,6 +190,7 @@ impl Team {
             ],
             max_visits: 3,
             handoff_tokens: 150_000,
+            session_tokens: 100_000,
         }
     }
 
@@ -203,6 +207,7 @@ impl Team {
         let max_visits = u32::try_from(num("max_visits", 3)?)
             .map_err(|_| anyhow!("graph attribute max_visits is too large"))?;
         let handoff_tokens = num("handoff_tokens", 150_000)?;
+        let session_tokens = num("session_tokens", 100_000)?;
 
         let mut roles = BTreeMap::new();
         for node in &graph.nodes {
@@ -280,6 +285,7 @@ impl Team {
             links,
             max_visits,
             handoff_tokens,
+            session_tokens,
         })
     }
 

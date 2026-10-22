@@ -112,6 +112,9 @@ wteam run --pairs 2 --budget-tokens 2000000 --max-turns 200
 - The orchestrator hands off to a new generation when its context passes
   `min(handoff_tokens, 0.75 × context_window)`. The handoff is written to
   `handoffs/orchestrator-<gen>.md`.
+- Workers and reviewers keep their session across tickets until their context passes
+  `session_tokens` (default 100000); the next ticket then starts a fresh session.
+  `session_tokens=0` starts every ticket fresh.
 - Stop reasons: no ticket runnable or in progress, ready tickets not dispatched,
   `--max-turns` reached, token budget exceeded, `--timeout` reached, or a failed
   orchestrator turn.
@@ -136,7 +139,7 @@ pass `--team <name|path>`:
 
 ```dot
 digraph default {
-  graph [max_visits=3, handoff_tokens=150000]
+  graph [max_visits=3, handoff_tokens=150000, session_tokens=100000]
   orchestrator [agent="orchestrator"]
   worker       [agent="worker", count="$pairs"]
   reviewer     [agent="reviewer", count="$pairs"]

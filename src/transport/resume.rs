@@ -211,15 +211,22 @@ pub fn release(s: &mut State, agent: &str) {
     st.turn_spawned_at = None;
 }
 
-/// Point `st`'s session at `ticket`. A session that works on another ticket is dropped, so the
-/// next turn starts fresh with the role prompt. The same ticket keeps its session (a FAIL fix,
-/// a landing-conflict return or a requeue of the same ticket resumes it).
-pub fn bind_session(st: &mut crate::state::AgentState, ticket: &str) {
-    if st.session_ticket.as_deref() != Some(ticket) {
+/// Point `st`'s session at `ticket`. The same ticket keeps its session (a FAIL fix, a
+/// landing-conflict return or a requeue of the same ticket resumes it). A session that worked on
+/// another ticket carries over while its last context stays under `limit` tokens, so the agent
+/// keeps what it learned of the code; past `limit` (or with `limit` 0) the next turn starts fresh
+/// with the role prompt.
+pub fn bind_session(st: &mut crate::state::AgentState, ticket: &str, limit: u64) {
+    if st.session_ticket.as_deref() == Some(ticket) {
+        return;
+    }
+    let small = st.context_tokens.is_some_and(|t| t < limit);
+    if !(small && st.session_id.is_some()) {
         st.session_id = None;
         st.session_turns = 0;
-        st.session_ticket = Some(ticket.to_string());
+        st.context_tokens = None;
     }
+    st.session_ticket = Some(ticket.to_string());
 }
 
 /// What the loop does when an agent's mailbox has no undelivered mail.
@@ -285,7 +292,7 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
                         .rev()
                         .find_map(|m| m.ticket);
                     if let Some(ticket) = latest {
-                        bind_session(st, &ticket);
+                        bind_session(st, &ticket, ctx.team.session_tokens);
                     }
                 }
                 let first = st.session_id.is_none() && st.session_turns == 0;
@@ -715,13 +722,41 @@ mod tests {
             session_ticket: Some("01".into()),
             ..Default::default()
         };
-        bind_session(&mut st, "01");
+        bind_session(&mut st, "01", 100_000);
         assert_eq!(st.session_id.as_deref(), Some("S1"));
         assert_eq!(st.session_turns, 2);
-        bind_session(&mut st, "02");
+        bind_session(&mut st, "02", 100_000);
         assert_eq!(st.session_id, None);
         assert_eq!(st.session_turns, 0);
         assert_eq!(st.session_ticket.as_deref(), Some("02"));
+    }
+
+    #[test]
+    fn bind_session_carries_a_small_session_to_the_next_ticket() {
+        let small = crate::state::AgentState {
+            session_id: Some("S1".into()),
+            session_turns: 3,
+            session_ticket: Some("01".into()),
+            context_tokens: Some(40_000),
+            ..Default::default()
+        };
+        let mut st = small.clone();
+        bind_session(&mut st, "02", 100_000);
+        assert_eq!(st.session_id.as_deref(), Some("S1"));
+        assert_eq!(st.session_turns, 3);
+        assert_eq!(st.session_ticket.as_deref(), Some("02"));
+        // Past the limit, or with limit 0, the next ticket starts fresh.
+        for (tokens, limit) in [(120_000, 100_000), (40_000, 0)] {
+            let mut st = crate::state::AgentState {
+                context_tokens: Some(tokens),
+                ..small.clone()
+            };
+            bind_session(&mut st, "02", limit);
+            assert_eq!(st.session_id, None, "tokens {tokens} limit {limit}");
+            assert_eq!(st.session_turns, 0);
+            assert_eq!(st.context_tokens, None);
+            assert_eq!(st.session_ticket.as_deref(), Some("02"));
+        }
     }
 
     #[test]
