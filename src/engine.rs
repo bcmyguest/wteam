@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::paths::Paths;
+use crate::paths::{Paths, WTEAM_DIR};
 use crate::state::{EventKind, State, TicketStatus, Verdict, VerdictKind};
 use crate::team::{DEFAULT_CHECK_TIMEOUT_SECS, NodeKind, Team, TeamEvent, parse_instance};
 use crate::work::{self, Ticket};
@@ -134,6 +134,8 @@ const CHECK_TAIL_LINES: usize = 40;
 const SPAWN_GRACE_NANOS: u64 = 30_000_000_000;
 /// Consecutive failed dispatches after which a ticket blocks instead of staying ready.
 pub const DISPATCH_ATTEMPTS: u32 = 3;
+/// Time limit for the project worktree hook (`.wteam/hooks/worktree`).
+const HOOK_TIMEOUT_SECS: u64 = 120;
 
 /// Normalise `1`/`#01` to the two-digit ticket id and load its definition.
 fn find_ticket(ctx: &Ctx, id: &str) -> Result<Ticket> {
@@ -646,6 +648,40 @@ fn run_check(dir: &Path, script: &str, ticket: &str, timeout_secs: u64) -> Resul
     Ok(Some(format!("{head}:\n{tail}")))
 }
 
+/// Run the project's worktree hook (`sh .wteam/hooks/worktree <dir>`, cwd the repo root) for
+/// `dir`, the pair worktree or the root. `None` when there is no hook or it passed; else the
+/// failure text with the output tail.
+pub fn run_hook(ctx: &Ctx, dir: &Path, ticket: &str) -> Result<Option<String>> {
+    if !ctx.paths.project_hook_file("worktree").is_file() {
+        return Ok(None);
+    }
+    let script = format!(
+        "sh {WTEAM_DIR}/hooks/worktree {}",
+        shell_quote(&dir.to_string_lossy())
+    );
+    run_check(&ctx.paths.root, &script, ticket, HOOK_TIMEOUT_SECS)
+}
+
+/// `s` as one POSIX shell word.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// The `## Project notes` section from `.wteam/brief.md`, appended verbatim. Empty when the
+/// file is absent or blank.
+fn project_notes(ctx: &Ctx) -> Result<String> {
+    let file = ctx.paths.project_brief_file();
+    if !file.is_file() {
+        return Ok(String::new());
+    }
+    let text =
+        std::fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+    if text.trim().is_empty() {
+        return Ok(String::new());
+    }
+    Ok(format!("\n## Project notes\n\n{}\n", text.trim_end()))
+}
+
 /// Count a failed check as a FAIL round against `worker`, whose ticket is `Doing`.
 fn gate_failed(
     ctx: &Ctx,
@@ -697,11 +733,12 @@ fn review_request(ctx: &Ctx, t: &Ticket, from: &str, context: &str) -> Result<St
             .for_each(|e| listed.push_str(&format!("- {e}\n")));
         listed.push('\n');
     }
+    let contract = format!("{}{}", contract_note(ctx), project_notes(ctx)?);
     Ok(format!(
         "Review request: ticket {id} from {from}\n\n{body}\n{contract}\n{context}\n{listed}Diff of the ticket's files and extras against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then write the verdict sections (FINDINGS, NOTES, FOLLOW-UPS) to a file and run exactly one of:\n- `wteam verdict {id} pass --file <path>`\n- `wteam verdict {id} fail --file <path>` (one `- ` bullet per blocking finding)\n",
         id = t.id,
         body = t.body.trim(),
-        contract = contract_note(ctx),
+        contract = contract,
     ))
 }
 
@@ -719,7 +756,13 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
     let all = work::load_tickets(&ctx.paths.tickets_dir())?;
     let role = dispatch_role(ctx);
     let pairs = ctx.team.count(&role);
-    let (agent, round, last, note) = crate::state::with_state(&ctx.paths, |s| {
+    // Everything fallible that is not state lives before phase 1, so a failure here leaves the
+    // ticket untouched.
+    let notes = project_notes(ctx)?;
+    // Phase 1, under the state lock: pick the pair, prepare its worktree and mark the ticket
+    // `Doing` on it. `Doing` keeps the pair busy, so no other dispatch takes it while the hook
+    // runs in phase 2.
+    let (agent, round, last, note, dir, prior) = crate::state::with_state(&ctx.paths, |s| {
         if !work::ready(&all, s).iter().any(|r| r.id == t.id) {
             bail!(
                 "ticket {} is not ready (it must be todo with every blocker done)",
@@ -782,10 +825,13 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
                 }
             }
         };
-        if s.run.isolation == "worktree" {
-            worktree::prepare(&ctx.paths, n, &t.id)?;
-        }
+        let dir = if s.run.isolation == "worktree" {
+            Some(worktree::prepare(&ctx.paths, n, &t.id)?)
+        } else {
+            None
+        };
         let agent = crate::team::instance_id(&role, n);
+        let prior = s.ticket_mut(&t.id).clone();
         let ts = s.ticket_mut(&t.id);
         ts.status = TicketStatus::Doing;
         ts.assignee = Some(agent.clone());
@@ -799,21 +845,44 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
             ts.rounds + 1,
             ts.last_verdict.clone(),
             ts.note.clone(),
+            dir,
+            prior,
         ))
     })?;
-    mail_and_deliver(
-        ctx,
-        &agent,
-        "orchestrator",
-        &t.id,
-        &brief(
-            &t,
-            round,
-            last.as_ref(),
-            note.as_deref(),
-            &contract_note(ctx),
-        ),
-    )?;
+    // Phase 2 and the mail, no lock held for the hook (up to HOOK_TIMEOUT_SECS). Any error after
+    // phase 1 restores the prior ticket state; the caller's dispatch-failure cap counts it.
+    let sent = (|| -> Result<()> {
+        if let Some(dir) = &dir {
+            let failure = match run_hook(ctx, dir, &t.id) {
+                Ok(None) => None,
+                Ok(Some(err)) => Some(err),
+                Err(e) => Some(format!("{e:#}")),
+            };
+            if let Some(err) = failure {
+                bail!("worktree hook failed: {err}");
+            }
+        }
+        mail_and_deliver(
+            ctx,
+            &agent,
+            "orchestrator",
+            &t.id,
+            &brief(
+                &t,
+                round,
+                last.as_ref(),
+                note.as_deref(),
+                &format!("{}{notes}", contract_note(ctx)),
+            ),
+        )
+    })();
+    if let Err(e) = sent {
+        crate::state::with_state(&ctx.paths, |s| {
+            *s.ticket_mut(&t.id) = prior;
+            Ok(())
+        })?;
+        return Err(e);
+    }
     Ok(agent)
 }
 

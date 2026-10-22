@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
-use crate::engine::Ctx;
+use crate::engine::{self, Ctx};
 use crate::mailbox;
 use crate::paths::Paths;
 use crate::state::{self, Event, EventKind, State, TicketStatus};
@@ -71,9 +71,20 @@ struct Snapshot {
 /// Drive the orchestrator until the run stops. Returns the stop report text.
 pub fn run(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
     let mut failed = BTreeMap::new();
+    // The root hook is advisory: a failure warns in the output and the run goes on.
+    let root_hook = match engine::run_hook(ctx, &ctx.paths.root, "") {
+        Ok(None) => None,
+        Ok(Some(err)) => Some(err),
+        Err(e) => Some(format!("{e:#}")),
+    };
     let reason = drive(ctx, opts, &mut failed)?;
     let report = crate::report::stop_report(&ctx.paths)?;
     let mut text = format!("Run stopped: {reason}.\n\n{report}");
+    if let Some(err) = root_hook {
+        text.push_str(&format!(
+            "\n\nWarning: worktree hook failed on the repo root:\n{err}"
+        ));
+    }
     if !failed.is_empty() {
         text.push_str("\n\nDispatch failed (tickets stay ready):");
         for (ticket, err) in &failed {

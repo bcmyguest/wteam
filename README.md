@@ -161,6 +161,23 @@ do not reach them. Set
 `WTEAM_CLAUDE_USER_SETTINGS=1` to keep user settings. Role prompts require one
 command per shell call.
 
+## Project hooks
+
+Three optional files under `.wteam/` plug project tooling in without wteam
+knowing about it:
+
+- `.wteam/hooks/worktree`: run as `sh .wteam/hooks/worktree <dir>` from the repo
+  root after a pair worktree is prepared and before its first turn, and once on
+  the repo root when `wteam run` starts. A failing hook (non-zero exit or 120 s
+  timeout) fails that dispatch, so the ticket counts toward the dispatch-failure
+  cap. On the root it prints a warning and the run goes on.
+- `.wteam/brief.md`: appended verbatim under `## Project notes` in every worker
+  brief and reviewer request. Absent or blank adds nothing.
+- `extends` in a profile: `.wteam/profiles/<name>.toml` with
+  `extends = "<builtin or profile>"` appends its `allow`, `ask` and `deny` lists
+  to the parent's, parent first, duplicates removed. Cycles and unknown parents
+  are errors that name the chain.
+
 ## Permissions
 
 Profiles are Claude permission rules: `control`, `review`, `edit` and `full`.
@@ -177,6 +194,8 @@ and reasons are in the
 .wteam/.gitignore            self-ignoring
 .wteam/team.dot              optional team override
 .wteam/agents/, profiles/    optional agent and profile overrides
+.wteam/brief.md              optional project notes for every worker and reviewer
+.wteam/hooks/worktree        optional script run per pair worktree
 .wteam/<slug>/spec.md
 .wteam/<slug>/tickets/NN-name.md
 .wteam/<slug>/state.json

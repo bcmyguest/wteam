@@ -73,6 +73,14 @@ impl Paths {
     pub fn project_profiles_dir(&self) -> PathBuf {
         self.wteam_dir().join("profiles")
     }
+    /// Project brief text appended to every worker brief and review request.
+    pub fn project_brief_file(&self) -> PathBuf {
+        self.wteam_dir().join("brief.md")
+    }
+    /// Project hook script `.wteam/hooks/<name>`, run with `sh`.
+    pub fn project_hook_file(&self, name: &str) -> PathBuf {
+        self.wteam_dir().join("hooks").join(name)
+    }
 }
 
 /// Create `.wteam/` with a self-ignoring `.gitignore` (contents `*`). Idempotent.

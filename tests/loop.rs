@@ -924,3 +924,41 @@ fn requeued_ticket_starts_fresh_when_its_worker_ran_another_ticket() {
         vec!["|role", "|role", "|role"]
     );
 }
+
+/// Reviewer that records each review request it was sent, then passes ticket 01.
+const RECORDING_REVIEWER: &str = r#"
+printf '%s\n=====\n' "$WTEAM_PROMPT" >> "$WTEAM_FAKE_DIR/review-prompts"
+wteam verdict 01 pass
+"#;
+
+#[test]
+fn project_brief_reaches_worker_brief_and_review_request_under_project_notes() {
+    let r = repo();
+    r.write(".wteam/brief.md", "Use codegraph before grep.\n");
+    r.agent_script("worker", WORKER);
+    r.agent_script("reviewer", RECORDING_REVIEWER);
+    dispatch(&r, "01");
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    for log in ["worker-prompts", "review-prompts"] {
+        let text = r.read(&format!(".wteam-fake/{log}"));
+        assert!(
+            text.contains("## Project notes\n\nUse codegraph before grep.\n"),
+            "{log}: {text}"
+        );
+    }
+}
+
+#[test]
+fn absent_project_brief_adds_no_project_notes_heading() {
+    let r = repo();
+    r.agent_script("worker", WORKER);
+    r.agent_script("reviewer", RECORDING_REVIEWER);
+    dispatch(&r, "01");
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    for log in ["worker-prompts", "review-prompts"] {
+        assert!(
+            !r.read(&format!(".wteam-fake/{log}"))
+                .contains("Project notes")
+        );
+    }
+}

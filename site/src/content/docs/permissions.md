@@ -75,3 +75,19 @@ deny      Read(**/.env)      ✔       ✘ read denies are not enforced; the san
 - **pi** runs tools unrestricted, so every rule is ✘. Run pi agents inside a sandbox.
 
 The `full` profile sets bypass on every CLI and enforces nothing.
+
+## Extending a profile
+
+A project profile can start from another with `extends`. Its rule lists go after the
+parent's, duplicates dropped, so a project adds rules without copying the builtin:
+
+```toml
+name = "graph"
+extends = "edit"
+allow = ["Bash(codegraph *)"]
+```
+
+A profile that sets `extends` may not set `bypass`, and may not extend a bypass
+profile such as `full`. Either is an error naming the profile. Bypass ignores every
+rule, so the denies in the chain would vanish silently. A profile without `extends`
+may still set `bypass = true`.

@@ -265,10 +265,27 @@ pub fn builtin(name: &str) -> Option<Profile> {
 }
 
 /// Find profile `name` in `search` dirs (`<name>.toml`), else the built-ins.
+/// A file's `extends = "<parent>"` merges the parent's rules in front of its own.
 pub fn load(name: &str, search: &[PathBuf]) -> Result<Profile> {
+    load_chain(name, search, &mut Vec::new())
+}
+
+/// [`load`] with the `extends` chain so far, for cycle detection.
+fn load_chain(name: &str, search: &[PathBuf], chain: &mut Vec<String>) -> Result<Profile> {
     if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
         bail!("invalid profile name `{name}`");
     }
+    if chain.iter().any(|c| c == name) {
+        bail!("profile cycle: {} -> {name}", chain.join(" -> "));
+    }
+    chain.push(name.to_string());
+    let loaded = load_one(name, search, chain);
+    chain.pop();
+    loaded
+}
+
+/// Load one profile: its file (merged onto its parent) or else the built-in.
+fn load_one(name: &str, search: &[PathBuf], chain: &mut Vec<String>) -> Result<Profile> {
     for dir in search {
         let file = dir.join(format!("{name}.toml"));
         if !file.is_file() {
@@ -278,6 +295,14 @@ pub fn load(name: &str, search: &[PathBuf]) -> Result<Profile> {
             .with_context(|| format!("reading {}", file.display()))?;
         let mut table: toml::Table =
             toml::from_str(&text).with_context(|| format!("parsing {}", file.display()))?;
+        let parent = match table.remove("extends") {
+            None => None,
+            Some(toml::Value::String(p)) => Some(p),
+            Some(other) => bail!(
+                "parsing {}: `extends` must be a profile name, not {other}",
+                file.display()
+            ),
+        };
         table
             .entry("name")
             .or_insert_with(|| toml::Value::String(name.to_string()));
@@ -285,7 +310,25 @@ pub fn load(name: &str, search: &[PathBuf]) -> Result<Profile> {
             .try_into()
             .with_context(|| format!("parsing {}", file.display()))?;
         rules_of(&profile).with_context(|| format!("in {}", file.display()))?;
-        return Ok(profile);
+        // Bypass ignores every rule, so an extending profile could drop its parent's denies.
+        if parent.is_some() && profile.bypass {
+            bail!(
+                "profile `{name}` ({}) sets both `extends` and `bypass`; an extending profile may not bypass",
+                file.display()
+            );
+        }
+        let Some(parent) = parent else {
+            return Ok(profile);
+        };
+        let base = load_chain(&parent, search, chain)
+            .with_context(|| format!("profile `{name}` extends `{parent}`"))?;
+        // Bypass ignores the child's rules too, so a bypass parent cannot be extended.
+        if base.bypass {
+            bail!(
+                "profile `{name}` extends bypass profile `{parent}`; bypass profiles cannot be extended"
+            );
+        }
+        return Ok(merge(base, profile));
     }
     builtin(name).with_context(|| {
         format!(
@@ -293,6 +336,26 @@ pub fn load(name: &str, search: &[PathBuf]) -> Result<Profile> {
             BUILTINS.join(", ")
         )
     })
+}
+
+/// `child` on top of `parent`: rule lists concatenated parent first, duplicates dropped.
+fn merge(parent: Profile, child: Profile) -> Profile {
+    fn union(first: Vec<String>, second: Vec<String>) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for rule in first.into_iter().chain(second) {
+            if !out.contains(&rule) {
+                out.push(rule);
+            }
+        }
+        out
+    }
+    Profile {
+        name: child.name,
+        allow: union(parent.allow, child.allow),
+        ask: union(parent.ask, child.ask),
+        deny: union(parent.deny, child.deny),
+        bypass: parent.bypass || child.bypass,
+    }
 }
 
 /// Every rule of `p` parsed, in order allow, ask, deny.
@@ -671,5 +734,99 @@ mod tests {
                 .unwrap_or_else(|| panic!("{cli} lacks the Edit row"));
             assert_eq!(edit.support, want, "{cli}");
         }
+    }
+}
+
+#[cfg(test)]
+mod extends_tests {
+    use super::*;
+
+    fn dir_with(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, text) in files {
+            std::fs::write(dir.path().join(format!("{name}.toml")), text).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn extends_puts_parent_rules_first_and_drops_duplicates() {
+        let dir = dir_with(&[(
+            "graph",
+            "extends = \"edit\"\nallow = [\"Bash(codegraph *)\", \"Read(**)\"]\n",
+        )]);
+        let p = load("graph", &[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(p.name, "graph");
+        let edit = builtin("edit").unwrap();
+        assert_eq!(p.allow[..edit.allow.len()], edit.allow[..]);
+        assert_eq!(p.allow.last().unwrap(), "Bash(codegraph *)");
+        assert_eq!(p.allow.iter().filter(|r| *r == "Read(**)").count(), 1);
+        assert_eq!(p.ask, edit.ask);
+        assert_eq!(p.deny, edit.deny);
+    }
+
+    #[test]
+    fn extends_chains_through_project_files() {
+        let dir = dir_with(&[
+            ("mid", "extends = \"review\"\nallow = [\"Bash(make *)\"]\n"),
+            ("top", "extends = \"mid\"\ndeny = [\"Bash(rm -rf *)\"]\n"),
+        ]);
+        let p = load("top", &[dir.path().to_path_buf()]).unwrap();
+        assert!(p.allow.contains(&"Bash(make *)".to_string()));
+        assert!(p.allow.contains(&"Bash(cargo test *)".to_string()));
+        assert_eq!(p.deny, vec!["Bash(rm -rf *)".to_string()]);
+    }
+
+    #[test]
+    fn cycle_error_names_the_chain() {
+        let dir = dir_with(&[("a", "extends = \"b\"\n"), ("b", "extends = \"a\"\n")]);
+        let err = format!("{:#}", load("a", &[dir.path().to_path_buf()]).unwrap_err());
+        assert!(err.contains("profile cycle: a -> b -> a"), "{err}");
+    }
+
+    #[test]
+    fn self_extension_is_a_cycle() {
+        let dir = dir_with(&[("a", "extends = \"a\"\n")]);
+        let err = format!("{:#}", load("a", &[dir.path().to_path_buf()]).unwrap_err());
+        assert!(err.contains("profile cycle: a -> a"), "{err}");
+    }
+
+    #[test]
+    fn unknown_parent_is_an_error() {
+        let dir = dir_with(&[("a", "extends = \"nope\"\n")]);
+        let err = format!("{:#}", load("a", &[dir.path().to_path_buf()]).unwrap_err());
+        assert!(err.contains("unknown profile `nope`"), "{err}");
+    }
+
+    #[test]
+    fn extends_with_bypass_is_an_error_naming_the_profile() {
+        let dir = dir_with(&[("a", "extends = \"review\"\nbypass = true\n")]);
+        let err = format!("{:#}", load("a", &[dir.path().to_path_buf()]).unwrap_err());
+        assert!(
+            err.contains("profile `a`") && err.contains("bypass"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn extending_a_bypass_profile_is_an_error() {
+        let dir = dir_with(&[("a", "extends = \"full\"\nallow = [\"Read(**)\"]\n")]);
+        let err = format!("{:#}", load("a", &[dir.path().to_path_buf()]).unwrap_err());
+        assert!(
+            err.contains("extends bypass profile `full`; bypass profiles cannot be extended"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn bypass_without_extends_still_loads() {
+        let dir = dir_with(&[("a", "bypass = true\n")]);
+        assert!(load("a", &[dir.path().to_path_buf()]).unwrap().bypass);
+    }
+
+    #[test]
+    fn extends_must_be_a_string() {
+        let dir = dir_with(&[("a", "extends = [\"edit\"]\n")]);
+        assert!(load("a", &[dir.path().to_path_buf()]).is_err());
     }
 }

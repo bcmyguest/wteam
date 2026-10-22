@@ -1028,3 +1028,173 @@ fn permanently_failing_dispatch_blocks_after_three_attempts_and_the_run_goes_on(
     assert_eq!(s["tickets"]["01"]["status"], "blocked");
     assert_eq!(s["tickets"]["01"]["dispatch_failures"], 3);
 }
+
+/// Worker that records whether its pair worktree already holds `.hooked`, then submits.
+const HOOK_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+if [ -f .hooked ]; then echo seen >> "$WTEAM_FAKE_DIR/hooked-seen"; fi
+mkdir -p src
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id"
+"#;
+
+#[test]
+fn worktree_hook_marks_the_pair_worktree_before_the_first_turn() {
+    let r = repo();
+    r.write(".wteam/hooks/worktree", "touch \"$1/.hooked\"\n");
+    r.agent_script("worker", HOOK_WORKER);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    assert!(r.read(".wteam-fake/hooked-seen").contains("seen"));
+}
+
+#[test]
+fn failing_worktree_hook_fails_the_dispatch_with_its_stderr() {
+    let r = repo();
+    r.write(".wteam/hooks/worktree", "echo 'index broke' >&2\nexit 1\n");
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam()
+        .args(["dispatch", "01"])
+        .assert()
+        .failure()
+        .stderr(contains("index broke"));
+    assert_ne!(r.state()["tickets"]["01"]["status"], "doing");
+}
+
+#[test]
+fn worktree_hook_failure_blocks_the_ticket_after_three_attempts() {
+    let r = repo();
+    go(&r);
+    r.write(
+        ".wteam/hooks/worktree",
+        "[ \"$WTEAM_TICKET\" = 01 ] && { echo 'no 01' >&2; exit 1; }\nexit 0\n",
+    );
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    let out = r
+        .wteam()
+        .args(["run", "--dispatch", "auto", "--pairs", "2"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(text.contains("dispatch failed 3 times"), "{text}");
+    assert!(text.contains("no 01"), "{text}");
+    let s = r.state();
+    assert_eq!(s["tickets"]["02"]["status"], "done");
+    assert_eq!(s["tickets"]["01"]["status"], "blocked");
+}
+
+#[test]
+fn run_start_marks_the_repo_root_with_the_worktree_hook() {
+    let r = repo();
+    r.write(".wteam/hooks/worktree", "touch \"$1/.hooked\"\n");
+    r.agent_script("orchestrator", "echo ok\n");
+    r.wteam()
+        .args(["run", "--dispatch", "auto", "--pairs", "2"])
+        .assert()
+        .success();
+    assert!(r.path().join(".hooked").is_file());
+}
+
+#[test]
+fn failing_hook_on_the_repo_root_only_warns_at_run_start() {
+    let r = repo();
+    r.write(
+        ".wteam/hooks/worktree",
+        "[ -d \"$1/.wteam\" ] && { echo 'root broke' >&2; exit 1; }\nexit 0\n",
+    );
+    r.agent_script("orchestrator", "echo ok\n");
+    r.wteam()
+        .args(["run", "--dispatch", "auto", "--pairs", "2"])
+        .assert()
+        .success()
+        .stdout(contains("Warning: worktree hook failed on the repo root"))
+        .stdout(contains("root broke"));
+}
+
+/// Worker for the lock test: ticket 02 parks on `go2`, then submits. Each submit is logged
+/// after it returns, so the log shows whether it finished during another ticket's hook.
+const LOCK_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+if [ "$id" = "02" ]; then
+  i=0
+  while [ ! -f "$WTEAM_FAKE_DIR/go2" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+fi
+mkdir -p src
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id"
+echo "submitted $id" >> "$WTEAM_FAKE_DIR/order.log"
+"#;
+
+/// Poll `.wteam-fake/order.log` until it has `line` (30 s limit).
+fn wait_for_order_line(r: &Repo, line: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !r.read(".wteam-fake/order.log").lines().any(|l| l == line) {
+        assert!(std::time::Instant::now() < deadline, "no `{line}` in time");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_slow_worktree_hook_does_not_hold_the_state_lock() {
+    let r = repo();
+    // Ticket 01's hook takes 2 s; ticket 02 never runs one.
+    r.write(
+        ".wteam/hooks/worktree",
+        "[ \"$WTEAM_TICKET\" = 01 ] || exit 0\necho 'hook-start 01' >> \"$WTEAM_FAKE_DIR/order.log\"\nsleep 2\necho 'hook-end 01' >> \"$WTEAM_FAKE_DIR/order.log\"\n",
+    );
+    r.agent_script("worker", LOCK_WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.wteam().args(["dispatch", "02"]).assert().success();
+    std::thread::scope(|sc| {
+        let slow = sc.spawn(|| r.wteam().args(["dispatch", "01"]).assert().success());
+        wait_for_order_line(&r, "hook-start 01");
+        // Ticket 02's submit runs while ticket 01's hook is still sleeping.
+        r.write(".wteam-fake/go2", "");
+        wait_for_order_line(&r, "submitted 02");
+        slow.join().unwrap();
+    });
+
+    let log = r.read(".wteam-fake/order.log");
+    let at = |line: &str| {
+        log.lines()
+            .position(|l| l == line)
+            .unwrap_or_else(|| panic!("no `{line}` in {log}"))
+    };
+    assert!(at("submitted 02") < at("hook-end 01"), "{log}");
+}
+
+#[test]
+fn unreadable_brief_fails_dispatch_and_leaves_the_ticket_ready() {
+    let r = repo();
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    std::fs::write(r.path().join(".wteam/brief.md"), [0xff, 0xfe, 0x00]).unwrap();
+    r.wteam()
+        .args(["dispatch", "01"])
+        .assert()
+        .failure()
+        .stderr(contains("brief.md"));
+    assert_ne!(r.state()["tickets"]["01"]["status"], "doing");
+    assert!(!r.path().join(".wteam/demo/worktrees/pair1").exists());
+
+    std::fs::remove_file(r.path().join(".wteam/brief.md")).unwrap();
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    assert_eq!(r.state()["tickets"]["01"]["status"], "doing");
+}
+
+#[test]
+fn mail_failure_after_reservation_rolls_the_ticket_back() {
+    let r = repo();
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    // Mail cannot be appended while `mail` is a file, so the mail step fails after phase 1.
+    std::fs::remove_dir_all(r.effort().join("mail")).unwrap();
+    std::fs::write(r.effort().join("mail"), "blocker").unwrap();
+    r.wteam().args(["dispatch", "01"]).assert().failure();
+    let s = r.state();
+    assert_ne!(s["tickets"]["01"]["status"], "doing");
+    assert!(s["tickets"]["01"]["assignee"].is_null(), "{s:#}");
+    assert_eq!(s["tickets"]["01"]["pair"], serde_json::Value::Null);
+}

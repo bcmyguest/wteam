@@ -82,6 +82,24 @@ extra_args = []      # passed through to the CLI
 Optional. Resolved from `.wteam/profiles/<name>.toml`. Rules use Claude syntax
 (see [Permissions](../permissions/)).
 
+```toml
+name = "graph"
+extends = "edit"                # optional; builtin or another profile
+allow = ["Bash(codegraph *)"]   # appended after the parent's lists, duplicates dropped
+```
+
+`extends` merges the parent's `allow`, `ask` and `deny` in front of the file's own.
+A cycle or an unknown parent is an error that names the chain.
+
+## Project hooks
+
+- `.wteam/hooks/worktree`: `sh .wteam/hooks/worktree <dir>`, cwd the repo root, 120 s
+  limit. Runs on each prepared pair worktree before its first turn, and on the repo
+  root at `wteam run` start. A failure fails the dispatch (the stdout and stderr tail is the
+  error); on the root it is a warning.
+- `.wteam/brief.md`: appended verbatim under `## Project notes` in every worker brief
+  and reviewer request.
+
 ## Files under `.wteam/<slug>/`
 
 `spec.md`, `tickets/NN-name.md`, `state.json`, `mail/<agent>.md`,

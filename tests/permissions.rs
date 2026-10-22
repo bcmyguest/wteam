@@ -247,3 +247,76 @@ fn reviewer_turn_anchors_settings_in_its_pair_worktree() {
         pair.canonicalize().unwrap().display().to_string()
     );
 }
+
+#[test]
+fn profile_extends_adds_rules_to_the_parent() {
+    let r = Repo::new("demo");
+    r.write(
+        ".wteam/profiles/graph.toml",
+        "name = \"graph\"\nextends = \"edit\"\nallow = [\"Bash(codegraph *)\"]\n",
+    );
+    let out = r
+        .wteam()
+        .args(["permissions", "--profile", "graph", "--cli", "claude"])
+        .assert()
+        .success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    for rule in ["Bash(codegraph *)", "Edit(**)", "Bash(git push *)"] {
+        assert!(text.contains(rule), "missing {rule}: {text}");
+    }
+}
+
+#[test]
+fn profile_extends_cycle_names_the_chain() {
+    let r = Repo::new("demo");
+    r.write(".wteam/profiles/a.toml", "name = \"a\"\nextends = \"b\"\n");
+    r.write(".wteam/profiles/b.toml", "name = \"b\"\nextends = \"a\"\n");
+    r.wteam()
+        .args(["permissions", "--profile", "a"])
+        .assert()
+        .failure()
+        .stderr(contains("a -> b -> a"));
+}
+
+#[test]
+fn profile_extends_with_bypass_is_rejected() {
+    let r = Repo::new("demo");
+    r.write(
+        ".wteam/profiles/loose.toml",
+        "name = \"loose\"\nextends = \"review\"\nbypass = true\n",
+    );
+    r.wteam()
+        .args(["permissions", "--profile", "loose"])
+        .assert()
+        .failure()
+        .stderr(contains("profile `loose`"))
+        .stderr(contains("bypass"));
+}
+
+#[test]
+fn profile_extending_full_is_rejected() {
+    let r = Repo::new("demo");
+    r.write(
+        ".wteam/profiles/graph.toml",
+        "name = \"graph\"\nextends = \"full\"\nallow = [\"Read(**)\"]\n",
+    );
+    r.wteam()
+        .args(["permissions", "--profile", "graph"])
+        .assert()
+        .failure()
+        .stderr(contains("extends bypass profile `full`"));
+}
+
+#[test]
+fn profile_extends_unknown_parent_is_an_error() {
+    let r = Repo::new("demo");
+    r.write(
+        ".wteam/profiles/a.toml",
+        "name = \"a\"\nextends = \"nope\"\n",
+    );
+    r.wteam()
+        .args(["permissions", "--profile", "a"])
+        .assert()
+        .failure()
+        .stderr(contains("unknown profile `nope`"));
+}
