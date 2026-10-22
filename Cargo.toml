@@ -1,0 +1,40 @@
+[package]
+name = "wteam"
+version = "0.1.0"
+edition = "2024"
+description = "Portable worker/reviewer teams for coding agents (Claude Code, Codex, opencode, Cursor)"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/bcmyguest/wteam"
+homepage = "https://github.com/bcmyguest/wteam"
+documentation = "https://github.com/bcmyguest/wteam#readme"
+keywords = ["agents", "llm", "orchestration", "cli", "codex"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [".github/", ".pre-commit-config.yaml", "cliff.toml"]
+
+# Logic lives in the library (testable without a terminal); main.rs is only
+# the I/O shim around it.
+[lib]
+name = "wteam"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wteam"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+globset = "0.4"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
