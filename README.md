@@ -9,6 +9,8 @@ ticket, a reviewer passes or fails it, and a passed ticket commits. Agents talk
 through append-only mailboxes under `.wteam/`. Documentation site:
 <https://bcmyguest.github.io/wteam/>.
 
+![wteam demo](site/public/demo.gif)
+
 ## Install
 
 macOS and Linux (including WSL), from the latest GitHub release:
@@ -178,8 +180,8 @@ cd site && pnpm install && pnpm build
 ```
 
 The demo GIF (`site/public/demo.gif`) is rendered from `site/demo.tape` with
-`vhs`. TODO: generate it once `vhs` is installed; until then the landing page
-shows no GIF.
+`vhs` (scripted stand-in agents from `site/demo/setup.sh`); the tape's header
+has the Docker command.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org)
 (`feat:`, `fix:`, `docs:`, …), enforced by a commit-msg hook. The commit type
