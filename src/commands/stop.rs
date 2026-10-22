@@ -47,6 +47,8 @@ fn stop_agents(paths: &Paths) -> Result<Vec<String>> {
             crate::transport::resume::release(s, &id);
             stopped.push(id);
         }
+        // The run is over: the watcher's orchestrator turn ends with the adapter it killed.
+        s.run.active = false;
         Ok(stopped)
     })?;
     Ok(stopped)

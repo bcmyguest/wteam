@@ -27,6 +27,9 @@ pub struct AgentDef {
     pub profile: Option<String>,
     #[serde(default)]
     pub extra_args: Vec<String>,
+    /// Context window in tokens. The orchestrator hands off at 75% of it when set.
+    #[serde(default)]
+    pub context_window: Option<u64>,
 }
 
 /// Built-in definitions: (name, model, profile), all on the `claude` CLI.
@@ -55,6 +58,7 @@ pub fn load(name: &str, search: &[PathBuf]) -> Result<AgentDef> {
             prompt: Some(n.to_string()),
             profile: Some(profile.to_string()),
             extra_args: Vec::new(),
+            context_window: None,
         }),
         None => bail!(
             "no agent definition `{name}` (searched {} dirs and the built-ins)",

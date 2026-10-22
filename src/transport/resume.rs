@@ -23,6 +23,14 @@ impl Transport for Resume {
     }
 
     fn deliver(&self, ctx: &Ctx, agent: &str) -> Result<()> {
+        // The watcher runs the orchestrator's turns in the foreground. Its mail waits in the
+        // mailbox for the next digest instead of starting a concurrent detached turn.
+        if parse_instance(agent).0 == "orchestrator" {
+            let live = state::with_state(&ctx.paths, |s| Ok(crate::engine::clear_stale_run(s)))?;
+            if live {
+                return Ok(());
+            }
+        }
         let spawned = claim(&ctx.paths, agent)?;
         let Some(stamp) = spawned else {
             return Ok(());
@@ -113,6 +121,21 @@ fn claim(paths: &crate::paths::Paths, agent: &str) -> Result<Option<u64>> {
         st.turn_pid = None;
         st.turn_spawned_at = Some(stamp);
         Ok(Some(stamp))
+    })
+}
+
+/// Mark `agent` busy for a turn run by the watcher in the foreground. The adapter child's
+/// pid is recorded once it spawns (see `run_spec`), never the watcher's own. `false` if the
+/// agent is already busy.
+pub fn begin_foreground(paths: &crate::paths::Paths, agent: &str) -> Result<bool> {
+    Ok(claim(paths, agent)?.is_some())
+}
+
+/// Mark a foreground turn over: `agent` is idle again.
+pub fn end_foreground(paths: &crate::paths::Paths, agent: &str) -> Result<()> {
+    state::with_state(paths, |s| {
+        release(s, agent);
+        Ok(())
     })
 }
 
@@ -245,7 +268,7 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
                 return Ok(());
             }
             Turn::Run(first, session, turn, prompt) => {
-                if let Err(e) = one_turn(ctx, agent, first, session, turn, &prompt) {
+                if let Err(e) = one_turn(ctx, agent, first, session, turn, &prompt, false) {
                     fail_turn(ctx, agent, &format!("{e:#}"))?;
                     return Ok(());
                 }
@@ -295,14 +318,18 @@ fn apply_files(paths: &crate::paths::Paths, t: &crate::permissions::Translation)
 }
 
 /// Run one adapter turn for `agent`, write its log and record the outcome.
-fn one_turn(
+/// Returns the reply text. `foreground` turns (the watcher's orchestrator turns) run the
+/// adapter in its own process group and record its pid as the agent's `turn_pid`, so
+/// `wteam stop` ends the adapter without touching the watcher.
+pub fn one_turn(
     ctx: &Ctx,
     agent: &str,
     first: bool,
     session: Option<String>,
     turn: u32,
     prompt: &str,
-) -> Result<()> {
+    foreground: bool,
+) -> Result<String> {
     let (role, _) = parse_instance(agent);
     let search = search_dirs(ctx);
     let agent_name = match ctx.team.roles.get(&role).map(|r| &r.kind) {
@@ -349,7 +376,8 @@ fn one_turn(
     };
     let spec = adapter.command(&req);
     let log = ctx.paths.logs_dir().join(format!("{agent}-{turn}.log"));
-    let (stdout, stderr, ok) = run_with_retries(&spec)?;
+    let track = foreground.then_some((&ctx.paths, agent));
+    let (stdout, stderr, ok) = run_with_retries(&spec, track)?;
     std::fs::create_dir_all(ctx.paths.logs_dir())?;
     std::fs::write(&log, format!("{stdout}{stderr}"))
         .with_context(|| format!("writing {}", log.display()))?;
@@ -380,7 +408,8 @@ fn one_turn(
         st.tokens_total += tokens.unwrap_or(0);
         st.turns += 1;
         Ok(())
-    })
+    })?;
+    Ok(out.text)
 }
 
 /// Backoff before each retry of a transient adapter failure; three retries, then the turn fails.
@@ -407,10 +436,13 @@ fn backoff_scale() -> f64 {
 ///
 /// A retry re-runs the whole adapter command. Side effects of a partly run attempt (files
 /// written, `wteam` calls already made) are not undone and repeat on the next attempt.
-fn run_with_retries(spec: &CommandSpec) -> Result<(String, String, bool)> {
+fn run_with_retries(
+    spec: &CommandSpec,
+    track: Option<(&crate::paths::Paths, &str)>,
+) -> Result<(String, String, bool)> {
     let mut attempt = 0;
     loop {
-        let (stdout, stderr, ok) = run_spec(spec)?;
+        let (stdout, stderr, ok) = run_spec(spec, track)?;
         let transient = !ok && is_transient(&format!("{stdout}{stderr}"));
         match BACKOFF_SECS.get(attempt) {
             Some(secs) if transient => {
@@ -429,8 +461,12 @@ fn tail(text: &str) -> String {
     lines[lines.len().saturating_sub(10)..].join("\n")
 }
 
-/// Run `spec` to completion: (stdout, stderr, exit success).
-fn run_spec(spec: &CommandSpec) -> Result<(String, String, bool)> {
+/// Run `spec` to completion: (stdout, stderr, exit success). With `track`, the child gets its
+/// own process group and its pid becomes that agent's `turn_pid` while it runs.
+fn run_spec(
+    spec: &CommandSpec,
+    track: Option<(&crate::paths::Paths, &str)>,
+) -> Result<(String, String, bool)> {
     let mut cmd = Command::new(&spec.program);
     cmd.args(&spec.args)
         .envs(spec.env.iter().cloned())
@@ -442,9 +478,19 @@ fn run_spec(spec: &CommandSpec) -> Result<(String, String, bool)> {
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if track.is_some() {
+        cmd.process_group(0);
+    }
     let mut child = cmd
         .spawn()
         .with_context(|| format!("running `{}`", spec.program))?;
+    if let Some((paths, agent)) = track {
+        let pid = child.id();
+        state::with_state(paths, |s| {
+            s.agents.entry(agent.to_string()).or_default().turn_pid = Some(pid);
+            Ok(())
+        })?;
+    }
     let writer = spec
         .stdin
         .clone()
@@ -455,6 +501,14 @@ fn run_spec(spec: &CommandSpec) -> Result<(String, String, bool)> {
             })
         });
     let out = child.wait_with_output()?;
+    // The child is gone: clear busy and its pid in the same write, so heal never sees a dead
+    // tracked pid on a busy agent.
+    if let Some((paths, agent)) = track {
+        state::with_state(paths, |s| {
+            release(s, agent);
+            Ok(())
+        })?;
+    }
     if let Some(w) = writer {
         let _ = w.join();
     }

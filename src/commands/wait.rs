@@ -42,21 +42,6 @@ pub fn run(g: &Global, a: &WaitArgs) -> Result<Out> {
         }
         std::thread::sleep(POLL);
     };
-    let text = events
-        .iter()
-        .map(|e| {
-            let kind = serde_json::to_value(e.kind)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default();
-            let t = e
-                .ticket
-                .as_deref()
-                .map(|t| format!(" {t}"))
-                .unwrap_or_default();
-            format!("{kind}{t}: {}", e.text)
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let text = crate::watcher::format_events(&events);
     Ok(Out::new(text, serde_json::json!({ "events": events })))
 }

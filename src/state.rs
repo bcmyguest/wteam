@@ -160,6 +160,17 @@ pub struct RunSettings {
     pub transport: String,
     /// Team preset or file the run uses.
     pub team: String,
+    /// Stop dispatching once the summed `tokens_total` exceeds this (`wteam run --budget-tokens`).
+    #[serde(default)]
+    pub budget_tokens: Option<u64>,
+    /// A `wteam run` is driving the orchestrator. Set at start, cleared at stop (normal, error,
+    /// or `wteam stop`). While set, mail to the orchestrator waits for the watcher's digest.
+    #[serde(default)]
+    pub active: bool,
+    /// Pid of the `wteam run` process that set `active`. A dead pid means the flag is stale
+    /// (the run was killed before it could clear the flag).
+    #[serde(default)]
+    pub watcher_pid: Option<u32>,
 }
 
 impl Default for RunSettings {
@@ -169,6 +180,9 @@ impl Default for RunSettings {
             isolation: "none".into(),
             transport: "resume".into(),
             team: "default".into(),
+            budget_tokens: None,
+            active: false,
+            watcher_pid: None,
         }
     }
 }

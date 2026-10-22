@@ -43,14 +43,34 @@ pub fn pid_alive(pid: u32) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Whether a `wteam run` is driving the orchestrator. A run flag whose watcher is dead is
+/// stale: this clears it and reports the run as not live.
+pub fn clear_stale_run(s: &mut State) -> bool {
+    if !s.run.active {
+        return false;
+    }
+    let live = s.run.watcher_pid.is_some_and(pid_alive);
+    if !live {
+        s.run.active = false;
+    }
+    live
+}
+
 /// Reset `busy` on agents whose turn is gone, log it, and start a turn for each agent that
 /// still has mail or a held ticket. Runs on every command through [`Ctx::load`].
 /// A busy agent with no pid is still spawning, unless its spawn is older than the grace period.
 pub fn heal(ctx: &Ctx) -> Result<()> {
     let revived = crate::state::with_state(&ctx.paths, |s| {
         let now = crate::state::now_nanos();
+        let live = clear_stale_run(s);
         let mut dead: Vec<(String, Option<u32>)> = Vec::new();
-        for (name, a) in s.agents.iter_mut().filter(|(_, a)| a.busy) {
+        // A live run's orchestrator turn runs in the watcher's foreground: not heal's to reset.
+        let skip = |name: &str| live && parse_instance(name).0 == "orchestrator";
+        for (name, a) in s
+            .agents
+            .iter_mut()
+            .filter(|(name, a)| a.busy && !skip(name.as_str()))
+        {
             let gone = match a.turn_pid {
                 Some(pid) => (!pid_alive(pid)).then_some(Some(pid)),
                 None => a

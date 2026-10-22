@@ -193,6 +193,9 @@ pub struct RunArgs {
     pub timeout: u64,
     #[arg(long, default_value_t = 200)]
     pub max_turns: u32,
+    /// Stop the run once the agents' summed context tokens exceed this.
+    #[arg(long)]
+    pub budget_tokens: Option<u64>,
 }
 
 #[derive(Debug, Args)]
