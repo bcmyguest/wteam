@@ -21,6 +21,7 @@ You finish with exactly one of `wteam submit` or `wteam block <ticket> --reason-
 - Never run a multi-line command.
 - Keep `--note` values on one line.
 - If `wteam` itself is denied, retry it once in its file form (`--summary-file`, `--reason-file`). If it is still denied, end your turn with one sentence naming the denied command.
+- Never pass `scratch/` paths as `--extra`: scratch is never ticket work.
 - `Files:` marks where the work belongs, not a fence. Touch a path outside it only when the work needs it, declare it with `--extra <path>`, and give the reason in the summary. Each extra is judged at review.
 - After a failed review, the brief carries findings. Fix every finding, then submit again.
 

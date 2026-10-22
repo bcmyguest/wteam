@@ -70,10 +70,18 @@ pub fn submit(g: &Global, a: &SubmitArgs) -> Result<Out> {
     };
     let ctx = Ctx::load(super::effort(g)?)?;
     let agent = super::caller(g, "human");
-    engine::submit(&ctx, &agent, &a.ticket, &summary, &a.extra)?;
+    let dropped = engine::submit(&ctx, &agent, &a.ticket, &summary, &a.extra)?;
+    let mut text = String::new();
+    if !dropped.is_empty() {
+        text.push_str(&format!(
+            "not committed: scratch/ and ignored paths are never ticket work: {}\n",
+            dropped.join(", ")
+        ));
+    }
+    text.push_str(&format!("submitted {} for review", a.ticket));
     Ok(Out::new(
-        format!("submitted {} for review", a.ticket),
-        json!({ "ticket": a.ticket, "from": agent }),
+        text,
+        json!({ "ticket": a.ticket, "from": agent, "dropped": dropped }),
     ))
 }
 

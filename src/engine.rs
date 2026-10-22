@@ -154,13 +154,55 @@ fn mail_and_deliver(ctx: &Ctx, to: &str, from: &str, ticket: &str, body: &str) -
 /// Pathspec groups a ticket's diff and commit cover. `Files:` are the planner's globs
 /// (`src/b/**` is documented), so that group stays glob. Extras are worker-declared, so they
 /// form a literal group. A ticket without `Files:` covers everything and has no extras group.
-fn path_groups<'a>(t: &'a Ticket, extras: &'a [String]) -> Vec<(bool, Vec<&'a str>)> {
-    let files: Vec<&str> = t.files.iter().map(String::as_str).collect();
-    let mut groups = vec![(false, files)];
-    if !t.files.is_empty() && !extras.is_empty() {
-        groups.push((true, extras.iter().map(String::as_str).collect()));
+/// Scratch and ignored paths leave every group: git refuses to add an ignored path. A group the
+/// filter empties is dropped.
+fn path_groups<'a>(dir: &Path, t: &'a Ticket, extras: &'a [String]) -> Vec<(bool, Vec<&'a str>)> {
+    if t.files.is_empty() {
+        // Whole repo minus top-level scratch/. Exclude magic needs git's normal pathspec mode.
+        return vec![(false, vec![":(exclude)scratch"])];
     }
+    let files: Vec<&str> = t
+        .files
+        .iter()
+        .map(String::as_str)
+        .filter(|f| is_ticket_path(dir, f))
+        .collect();
+    let mut groups = vec![(false, files)];
+    if !extras.is_empty() {
+        let kept: Vec<&str> = extras
+            .iter()
+            .map(String::as_str)
+            .filter(|e| is_ticket_path(dir, e))
+            .collect();
+        groups.push((true, kept));
+    }
+    groups.retain(|(_, specs)| !specs.is_empty());
     groups
+}
+
+/// Top-level `scratch/` holds the worker's throwaway notes, which are never ticket work.
+fn is_scratch(spec: &str) -> bool {
+    spec == "scratch" || spec.starts_with("scratch/")
+}
+
+/// Whether git ignores `spec` in `dir`. Tracked paths are never ignored, so they stay committable.
+fn is_ignored(dir: &Path, spec: &str) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["check-ignore", "-q", "--", spec])
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Whether `spec` may reach `git add`: neither scratch nor ignored.
+fn is_ticket_path(dir: &Path, spec: &str) -> bool {
+    !is_scratch(spec) && !is_ignored(dir, spec)
+}
+
+/// Split extras into `(kept, dropped)`. Dropped extras are never ticket work.
+fn split_extras(dir: &Path, extras: Vec<String>) -> (Vec<String>, Vec<String>) {
+    extras.into_iter().partition(|e| is_ticket_path(dir, e))
 }
 
 /// Append `-- <specs>` when there are specs; an empty list means the whole repo.
@@ -183,7 +225,7 @@ fn run_git(dir: &Path, literal: bool, args: &[&str]) -> Result<String> {
 /// `git diff HEAD` for the ticket's files and extras, new files included.
 fn ticket_diff(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
     let mut diff = String::new();
-    for (literal, specs) in path_groups(t, extras) {
+    for (literal, specs) in path_groups(dir, t, extras) {
         let mut args = vec!["--no-optional-locks", "diff", "HEAD"];
         push_specs(&mut args, &specs);
         diff.push_str(&run_git(dir, literal, &args)?);
@@ -244,24 +286,11 @@ fn git_index(dir: &Path, index: Option<&Path>, literal: bool, args: &[&str]) -> 
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Unstage `scratch/`: the worker's throwaway notes are never ticket work. `index` selects a
-/// temporary index, else the worktree's own.
-fn unstage_scratch(dir: &Path, index: Option<&Path>) -> Result<()> {
-    git_index(
-        dir,
-        index,
-        false,
-        &[
-            "rm",
-            "-r",
-            "--cached",
-            "-q",
-            "--ignore-unmatch",
-            "--",
-            "scratch",
-        ],
-    )
-    .map(drop)
+/// Unstage `scratch/` back to `base`: the worker's throwaway notes are never ticket work. Reset,
+/// not rm, so a tracked scratch file keeps its entry and no deletion gets staged. A path absent from
+/// `base` and the index is a no-op. `index` selects a temporary index, else the worktree's own.
+fn unstage_scratch(dir: &Path, index: Option<&Path>, base: &str) -> Result<()> {
+    git_index(dir, index, false, &["reset", "-q", base, "--", "scratch"]).map(drop)
 }
 
 /// Stage the ticket's files and extras and commit only them. Returns the new sha.
@@ -269,11 +298,11 @@ fn commit_ticket(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
     let msg = format!("feat: {} (wteam {})", t.title, t.id);
     if t.files.is_empty() {
         worktree::git(dir, &["add", "-A"])?;
-        unstage_scratch(dir, None)?;
+        unstage_scratch(dir, None, "HEAD")?;
         worktree::git(dir, &["commit", "--allow-empty", "-m", &msg])?;
     } else {
         let mut paths: Vec<String> = Vec::new();
-        for (literal, specs) in path_groups(t, extras) {
+        for (literal, specs) in path_groups(dir, t, extras) {
             for f in specs.iter().copied() {
                 // A pattern that matches nothing (a file the worker never touched) is fine.
                 if let Err(e) = run_git(dir, literal, &["add", "-A", "--", f])
@@ -282,6 +311,8 @@ fn commit_ticket(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
                     return Err(e);
                 }
             }
+            // A glob in `Files:` can match scratch/ too; keep it out of this commit.
+            unstage_scratch(dir, None, "HEAD")?;
             let mut args = vec!["--no-optional-locks", "diff", "--cached", "--name-only"];
             push_specs(&mut args, &specs);
             paths.extend(run_git(dir, literal, &args)?.lines().map(str::to_string));
@@ -323,7 +354,7 @@ fn squash_commit(
         if t.files.is_empty() {
             git_index(dir, idx, false, &["add", "-A"])?;
         } else {
-            for (literal, specs) in path_groups(t, extras) {
+            for (literal, specs) in path_groups(dir, t, extras) {
                 for f in specs.iter().copied() {
                     // A pattern that matches nothing (a file the worker never touched) is fine.
                     if let Err(e) = git_index(dir, idx, literal, &["add", "-A", "--", f])
@@ -334,7 +365,7 @@ fn squash_commit(
                 }
             }
         }
-        unstage_scratch(dir, idx)?;
+        unstage_scratch(dir, idx, base)?;
         let changed = git_index(dir, idx, false, &["diff", "--cached", "--name-only", base])?;
         if !t.files.is_empty() && changed.trim().is_empty() {
             bail!("nothing in the ticket's files changed");
@@ -995,13 +1026,13 @@ pub fn submit(
     ticket: &str,
     summary: &str,
     extras: &[String],
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let t = find_ticket(ctx, ticket)?;
     let new: Vec<String> = extras.iter().map(|e| e.trim().to_string()).collect();
     new.iter().try_for_each(|e| check_extra_path(e))?;
     let prior = extras_of(&crate::state::load(&ctx.paths)?, &t.id);
-    let extras = union_extras(&prior, &new);
     let dir = ticket_dir(ctx, &t.id)?;
+    let (extras, dropped) = split_extras(&dir, union_extras(&prior, &new));
     extras.iter().try_for_each(|e| check_no_symlink(&dir, e))?;
     check_no_markers(&dir)?;
     let all = work::load_tickets(&ctx.paths.tickets_dir())?;
@@ -1013,10 +1044,16 @@ pub fn submit(
         s.ticket_mut(&t.id).extras = extras.clone();
         Ok(())
     })?;
+    route_submission(ctx, &t, agent, summary)?;
+    Ok(dropped)
+}
+
+/// Run the verify gates, then route the submitted round to the first reviewer or command node.
+fn route_submission(ctx: &Ctx, t: &Ticket, agent: &str, summary: &str) -> Result<()> {
     let dir = ticket_dir(ctx, &t.id)?;
     for cmd in &t.verify {
         if let Some(out) = run_check(&dir, cmd, &t.id, DEFAULT_CHECK_TIMEOUT_SECS)? {
-            return gate_failed(ctx, &t, "verify", agent, TicketStatus::Doing, agent, out);
+            return gate_failed(ctx, t, "verify", agent, TicketStatus::Doing, agent, out);
         }
     }
     let summary = if summary.trim().is_empty() {
@@ -1052,13 +1089,12 @@ pub fn submit(
                     ts.assignee = Some(reviewer.clone());
                     Ok(())
                 })?;
-                let body =
-                    review_request(ctx, &t, agent, &format!("Worker summary:\n{summary}\n"))?;
+                let body = review_request(ctx, t, agent, &format!("Worker summary:\n{summary}\n"))?;
                 return mail_and_deliver(ctx, &reviewer, agent, &t.id, &body);
             }
             Some(NodeKind::Command { script, timeout }) => {
                 if let Some(out) = run_check(&dir, script, &t.id, *timeout)? {
-                    return gate_failed(ctx, &t, &link.to, agent, TicketStatus::Doing, agent, out);
+                    return gate_failed(ctx, t, &link.to, agent, TicketStatus::Doing, agent, out);
                 }
                 from = link.to.clone();
             }

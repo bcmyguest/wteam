@@ -686,6 +686,142 @@ fn landed_ticket_squashes_its_wip_history_into_one_commit_of_its_files() {
     assert!(!r.path().join("scratch/notes.txt").exists());
 }
 
+/// Worker that parks on `go`, then writes its `Files:` path, a real extra, a scratch extra and an
+/// ignored extra, and submits all three extras.
+const SCRATCH_EXTRA_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+i=0
+while [ ! -f "$WTEAM_FAKE_DIR/go" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+mkdir -p src scratch ignored
+echo edit >> "src/$id.txt"
+echo real > src/real.rs
+echo check > scratch/check.py
+echo x > ignored/x.txt
+wteam submit "$id" --summary "edited $id" --extra scratch/check.py --extra ignored/x.txt --extra src/real.rs > "$WTEAM_FAKE_DIR/submit-out"
+"#;
+
+/// Worker whose `Files:` glob `*.md` also matches an untracked scratch file.
+const GLOB_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+i=0
+while [ ! -f "$WTEAM_FAKE_DIR/go" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+mkdir -p scratch
+echo notes > notes.md
+echo plan > scratch/plan.md
+wteam submit "$id" --summary "edited $id"
+"#;
+
+/// Worker that writes its `Files:` paths, which name a scratch file and an ignored file, and submits.
+const FILES_SCRATCH_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+i=0
+while [ ! -f "$WTEAM_FAKE_DIR/go" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+mkdir -p src scratch ignored
+echo edit >> "src/$id.txt"
+echo plan > scratch/plan.md
+echo plan > ignored/plan.md
+wteam submit "$id" --summary "edited $id"
+"#;
+
+#[test]
+fn scratch_and_ignored_extras_never_reach_git_add() {
+    let r = repo();
+    r.write(".gitignore", "ignored/\n");
+    r.git(&["add", ".gitignore"]);
+    r.git(&["commit", "-q", "-m", "chore: ignore ignored/"]);
+    r.agent_script("worker", SCRATCH_EXTRA_WORKER);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    go(&r);
+
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    let tree = r.git(&["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(tree.contains("src/real.rs"), "{tree}");
+    assert!(tree.contains("src/01.txt"), "{tree}");
+    assert!(!tree.contains("scratch/check.py"), "{tree}");
+    assert!(!tree.contains("ignored/x.txt"), "{tree}");
+    let log = r.git(&["log", "--format=%s"]);
+    assert!(log.contains("feat: Add one (wteam 01)"), "{log}");
+    let out = std::fs::read_to_string(r.path().join(".wteam-fake/submit-out")).unwrap();
+    assert!(
+        out.contains("not committed: scratch/ and ignored paths are never ticket work"),
+        "{out}"
+    );
+    assert!(out.contains("scratch/check.py"), "{out}");
+    assert!(out.contains("ignored/x.txt"), "{out}");
+}
+
+/// Worker that commits a wip file first, so landing squashes, then writes a `*.md` note and a
+/// scratch file the glob also matches.
+const SQUASH_SCRATCH_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+i=0
+while [ ! -f "$WTEAM_FAKE_DIR/go" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+mkdir -p src scratch
+echo wip > src/wip.txt
+git add src/wip.txt
+git commit -qm wip
+echo notes > notes.md
+echo new > scratch/new.md
+wteam submit "$id" --summary "edited $id"
+"#;
+
+#[test]
+fn squash_keeps_tracked_scratch_and_skips_new_scratch() {
+    let r = repo();
+    r.write("scratch/x.txt", "kept\n");
+    r.git(&["add", "-A"]);
+    r.git(&["commit", "-q", "-m", "chore: track scratch"]);
+    r.agent_script("worker", SQUASH_SCRATCH_WORKER);
+    r.ticket("01", "Add one", "None", "*.md", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    go(&r);
+
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    let tree = r.git(&["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(tree.contains("scratch/x.txt"), "{tree}");
+    assert!(tree.contains("notes.md"), "{tree}");
+    assert!(!tree.contains("scratch/new.md"), "{tree}");
+}
+
+#[test]
+fn files_glob_does_not_commit_scratch_files_in_worktree() {
+    let r = repo();
+    r.agent_script("worker", GLOB_WORKER);
+    r.ticket("01", "Add one", "None", "*.md", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    go(&r);
+
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    let tree = r.git(&["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(tree.contains("notes.md"), "{tree}");
+    assert!(!tree.contains("scratch/plan.md"), "{tree}");
+}
+
+#[test]
+fn files_line_naming_scratch_or_ignored_paths_does_not_break_landing() {
+    let r = repo();
+    r.write(".gitignore", "ignored/\n");
+    r.git(&["add", ".gitignore"]);
+    r.git(&["commit", "-q", "-m", "chore: ignore ignored/"]);
+    r.agent_script("worker", FILES_SCRATCH_WORKER);
+    r.ticket(
+        "01",
+        "Add one",
+        "None",
+        "src/01.txt, scratch/plan.md, ignored/plan.md",
+        "",
+    );
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    go(&r);
+
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    let tree = r.git(&["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(tree.contains("src/01.txt"), "{tree}");
+    assert!(!tree.contains("scratch/plan.md"), "{tree}");
+    assert!(!tree.contains("ignored/plan.md"), "{tree}");
+}
+
 /// A ticket without `Files:` commits everything it touched except `scratch/`.
 #[test]
 fn filesless_ticket_commits_everything_but_scratch() {

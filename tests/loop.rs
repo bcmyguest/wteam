@@ -280,6 +280,179 @@ fn extra_paths_are_listed_for_review_and_committed_on_pass() {
     assert!(!files.contains(&"scratch.txt".to_string()), "{files:?}");
 }
 
+/// Repo whose history tracks `scratch/x.txt`, so a scratch path is a tracked file.
+fn repo_with_tracked_scratch() -> Repo {
+    let r = repo();
+    r.write("scratch/x.txt", "kept\n");
+    r.git(&["add", "-A"]);
+    r.git(&["commit", "-q", "-m", "chore: track scratch"]);
+    r
+}
+
+#[test]
+fn files_glob_keeps_tracked_scratch_and_skips_new_scratch() {
+    let r = repo_with_tracked_scratch();
+    r.ticket("01", "Add thing", "None", "*.md", "");
+    r.agent_script(
+        "worker",
+        "mkdir -p scratch\necho notes > notes.md\necho new > scratch/new.md\nwteam submit 01 --summary x\n",
+    );
+    r.agent_script("reviewer", "wteam verdict 01 pass\n");
+    dispatch(&r, "01");
+    let ev = events(&r);
+    assert_eq!(ev[0]["kind"], "passed", "{ev:?}");
+
+    let tree = r.git(&["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(tree.contains("scratch/x.txt"), "{tree}");
+    assert!(tree.contains("notes.md"), "{tree}");
+    assert!(!tree.contains("scratch/new.md"), "{tree}");
+    assert!(r.git(&["diff", "--cached", "--name-only"]).is_empty());
+}
+
+#[test]
+fn explicit_files_leave_no_staged_scratch_deletion() {
+    let r = repo_with_tracked_scratch();
+    r.ticket("01", "Add thing", "None", "notes.md", "");
+    r.agent_script(
+        "worker",
+        "echo notes > notes.md\nwteam submit 01 --summary x\n",
+    );
+    r.agent_script("reviewer", "wteam verdict 01 pass\n");
+    dispatch(&r, "01");
+    let ev = events(&r);
+    assert_eq!(ev[0]["kind"], "passed", "{ev:?}");
+
+    let tree = r.git(&["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(tree.contains("scratch/x.txt"), "{tree}");
+    assert!(r.git(&["diff", "--cached", "--name-only"]).is_empty());
+}
+
+#[test]
+fn files_less_landing_without_scratch_dir() {
+    let r = repo();
+    r.ticket("01", "Add thing", "None", "", "");
+    r.agent_script(
+        "worker",
+        "mkdir -p src\necho x > src/x.txt\nwteam submit 01 --summary x\n",
+    );
+    r.agent_script("reviewer", "wteam verdict 01 pass\n");
+    dispatch(&r, "01");
+    let ev = events(&r);
+    assert_eq!(ev[0]["kind"], "passed", "{ev:?}");
+
+    let tree = r.git(&["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(tree.contains("src/x.txt"), "{tree}");
+}
+
+#[test]
+fn submit_json_lists_dropped_extras() {
+    let r = repo();
+    r.agent_script(
+        "worker",
+        "i=0; while [ ! -f \"$WTEAM_FAKE_DIR/go\" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n",
+    );
+    r.agent_script("reviewer", "echo ok\n");
+    dispatch(&r, "01");
+    let out = r
+        .wteam()
+        .env("WTEAM_AGENT", "worker.1")
+        .args([
+            "--json",
+            "submit",
+            "01",
+            "--summary",
+            "x",
+            "--extra",
+            "scratch/check.py",
+            "--extra",
+            "src/real.rs",
+        ])
+        .assert()
+        .success();
+    let v: Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(v["dropped"], serde_json::json!(["scratch/check.py"]), "{v}");
+}
+
+#[test]
+fn files_glob_does_not_commit_scratch_files() {
+    let r = repo();
+    r.ticket("01", "Add thing", "None", "*.md", "");
+    r.agent_script(
+        "worker",
+        "mkdir -p scratch\necho notes > notes.md\necho plan > scratch/plan.md\nwteam submit 01 --summary x\n",
+    );
+    r.agent_script("reviewer", "wteam verdict 01 pass\n");
+    dispatch(&r, "01");
+    let ev = events(&r);
+    assert_eq!(ev[0]["kind"], "passed", "{ev:?}");
+
+    let files = files_of(&r, "HEAD");
+    assert!(files.contains(&"notes.md".to_string()), "{files:?}");
+    assert!(!files.contains(&"scratch/plan.md".to_string()), "{files:?}");
+}
+
+#[test]
+fn files_less_review_diff_excludes_scratch() {
+    let r = repo();
+    r.ticket("01", "Add thing", "None", "", "");
+    r.agent_script(
+        "worker",
+        "mkdir -p src scratch\necho x > src/x.txt\necho n > scratch/notes.txt\nwteam submit 01 --summary x\n",
+    );
+    r.agent_script(
+        "reviewer",
+        "printf '%s' \"$WTEAM_PROMPT\" > \"$WTEAM_FAKE_DIR/review-request\"\nwteam verdict 01 pass\n",
+    );
+    dispatch(&r, "01");
+    events(&r);
+
+    let req = r.read(".wteam-fake/review-request");
+    assert!(req.contains("src/x.txt"), "{req}");
+    assert!(!req.contains("diff --git a/scratch/"), "{req}");
+}
+
+#[test]
+fn scratch_and_ignored_extras_are_dropped_with_a_notice() {
+    let r = repo();
+    r.write(".gitignore", "ignored/\n");
+    // The worker parks on `go` so it holds ticket 01 while the test submits as worker.1.
+    r.agent_script(
+        "worker",
+        "i=0; while [ ! -f \"$WTEAM_FAKE_DIR/go\" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n",
+    );
+    r.agent_script("reviewer", "echo ok\n");
+    dispatch(&r, "01");
+    let out = r
+        .wteam()
+        .env("WTEAM_AGENT", "worker.1")
+        .args([
+            "submit",
+            "01",
+            "--summary",
+            "x",
+            "--extra",
+            "scratch/check.py",
+            "--extra",
+            "ignored/x.txt",
+            "--extra",
+            "src/real.rs",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(
+        stdout.contains("not committed: scratch/ and ignored paths are never ticket work"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("scratch/check.py"), "{stdout}");
+    assert!(stdout.contains("ignored/x.txt"), "{stdout}");
+    assert!(!stdout.contains("src/real.rs"), "{stdout}");
+    assert_eq!(
+        r.state()["tickets"]["01"]["extras"],
+        serde_json::json!(["src/real.rs"])
+    );
+}
+
 #[test]
 fn extra_path_inside_another_in_progress_tickets_files_is_refused() {
     let r = repo();

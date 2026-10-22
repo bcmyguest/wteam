@@ -289,6 +289,11 @@ fn worker_declares_extras_with_flag() {
 }
 
 #[test]
+fn worker_never_declares_scratch_as_extra() {
+    assert_mentions("worker", &["Never pass `scratch/` paths as `--extra`"]);
+}
+
+#[test]
 fn reviewer_judges_extras() {
     assert_mentions("reviewer", &["Extra paths", "unexplained"]);
 }
