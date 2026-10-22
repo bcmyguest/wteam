@@ -13,7 +13,7 @@ through append-only mailboxes under `.wteam/`. Documentation site:
 
 ## Benchmark
 
-On [Aider's polyglot benchmark](https://github.com/Aider-AI/polyglot-benchmark) (34 Python exercises, **hidden tests**):
+**Not wteam's target workload:** [Aider's polyglot benchmark](https://github.com/Aider-AI/polyglot-benchmark) is 34 small, independent exercises, scored here with **hidden tests**. wteam is built for large efforts with dependent tickets; that benchmark is in progress.
 
 | Configuration | Passed | Wall time | Cost |
 |---|---|---|---|
