@@ -18,7 +18,7 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `submit <ticket>` | Hand a finished round to review (`--summary <text>` or `--summary-file <path>`) |
 | `verdict <ticket> pass\|fail` | Record a verdict (`--file <path>` with FINDINGS/NOTES/FOLLOW-UPS sections, or `--finding`, `--note`, `--follow-up`) |
 | `block <ticket>` | Mark a ticket blocked (`--reason <text>` or `--reason-file <path>`) |
-| `requeue <ticket>` | Return a blocked ticket to todo (`--note <text>` or `--note-file <path>`, not both) |
+| `requeue <ticket>` | Return a blocked ticket to todo (`--note <text>` or `--note-file <path>`, not both; `--fresh` also discards the ticket's preserved work: its worktree and branch) |
 | `approve <ticket>` | Pass a human gate; the ticket resumes from the gate's pass route |
 | `send <to> <message>` | Message another agent |
 | `inbox` | Read mail (`--all` for the whole mailbox) |
@@ -43,7 +43,7 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `--max-turns <n>` | 200 | Orchestrator turns, handoff turns included |
 | `--dispatch <auto\|model>` | `auto` | `auto`: the watcher dispatches ready tickets and wakes the orchestrator only for blocks and human gates. `model`: the orchestrator dispatches every ticket |
 | `--budget-tokens <n>` | none | Stop new work once summed agent context tokens exceed `n` |
-| `--replan` | off | Under `auto`: each blocked ticket gets one planner turn to rewrite it and requeue it. A ticket blocked again stays blocked |
+| `--replan` | off | Under `auto`: each blocked ticket gets up to two planner turns to rewrite it and requeue it. A ticket blocked after its second re-plan stays blocked |
 | `--isolation <none\|worktree>` | `none` | `worktree` is not available yet |
 
 ## Team graph attributes

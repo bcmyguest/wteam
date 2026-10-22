@@ -71,7 +71,7 @@ pub struct TicketState {
     /// Orchestrator note from `wteam requeue`, shown in the next dispatch brief.
     #[serde(default)]
     pub note: Option<String>,
-    /// Planner re-plans spent on this ticket under `wteam run --replan` (budget: 1).
+    /// Planner re-plans spent on this ticket under `wteam run --replan` (budget: `watcher::REPLAN_BUDGET`).
     #[serde(default)]
     pub replans: u32,
     /// Changed paths outside `Files:` the worker declared at submit. Committed on PASS.

@@ -100,9 +100,11 @@ wteam run --pairs 2 --budget-tokens 2000000 --max-turns 200
   the budget. In-flight turns finish first.
 - `--dispatch auto|model` picks who dispatches (default `auto`). `model` also
   spends an orchestrator turn on every dispatch.
-- `--replan` (auto only, default off) gives each blocked ticket one planner turn. The
-  planner rewrites the ticket under the `plan` profile and requeues it. A ticket blocked again
-  stays blocked, and the stop report says it was re-planned once.
+- `--replan` (auto only, default off) gives each blocked ticket up to two planner turns. The
+  planner rewrites the ticket under the `plan` profile and requeues it. A ticket blocked after
+  its second re-plan stays blocked, and the stop report says how many re-plans were spent.
+  `wteam requeue NN --fresh` discards a blocked ticket's preserved work (worktree and branch)
+  so its next dispatch starts from main.
 - `--max-turns` caps orchestrator turns. Handoff turns count toward it.
 - The orchestrator hands off to a new generation when its context passes
   `min(handoff_tokens, 0.75 × context_window)`. The handoff is written to

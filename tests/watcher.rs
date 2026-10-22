@@ -809,9 +809,9 @@ fn ticket_blocked_again_after_replan_stays_blocked() {
 
     let text = run_ok(&r, &["--dispatch", "auto", "--replan"]);
 
-    assert_eq!(planner_calls(&r), 1, "planner must run once per ticket");
+    assert_eq!(planner_calls(&r), 2, "planner must run twice, then stop");
     assert_eq!(status_of(&r, "01"), "blocked", "{text}");
-    assert!(text.contains("re-planned once"), "{text}");
+    assert!(text.contains("2 re-plans"), "{text}");
 }
 
 #[test]
@@ -850,5 +850,6 @@ wteam requeue 01 || exit 1
         "{prompt}"
     );
     assert!(prompt.contains("wteam/demo/01"), "{prompt}");
-    assert!(prompt.contains("wteam requeue 01"), "{prompt}");
+    assert!(prompt.contains("wteam requeue 01`"), "{prompt}");
+    assert!(prompt.contains("wteam requeue 01 --fresh`"), "{prompt}");
 }

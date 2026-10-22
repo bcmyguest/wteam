@@ -1517,6 +1517,55 @@ pub fn block(ctx: &Ctx, agent: &str, ticket: &str, reason: &str) -> Result<()> {
     Ok(())
 }
 
+/// `requeue --fresh`: discard blocked `ticket`'s preserved work (its worktree and branch). Refuses
+/// when another active ticket holds the same pair or the ticket's worker is still in a turn.
+/// Clears the agent sessions bound to the ticket. A refusal leaves git and state unchanged.
+/// Runs under the state lock and takes the merge lock inside it, the only nesting order used.
+pub fn discard_preserved(paths: &Paths, s: &mut State, ticket: &str) -> Result<()> {
+    let Some(ts) = s.tickets.get(ticket) else {
+        return Ok(());
+    };
+    let (own_pair, assignee) = (ts.pair, ts.assignee.clone());
+    let holder = if s.run.isolation == "worktree" {
+        worktree::holders(paths)?.get(ticket).copied()
+    } else {
+        None
+    };
+    for pair in [own_pair, holder].into_iter().flatten() {
+        let other = s.tickets.iter().find(|(id, o)| {
+            id.as_str() != ticket
+                && o.pair == Some(pair)
+                && matches!(
+                    o.status,
+                    TicketStatus::Doing | TicketStatus::Review | TicketStatus::AwaitingApproval
+                )
+        });
+        if let Some((other, _)) = other {
+            bail!("pair {pair} is busy with {other}");
+        }
+    }
+    if let Some(agent) = assignee.as_deref()
+        && s.agents.get(agent).is_some_and(|a| a.busy)
+    {
+        bail!("{agent} is still running a turn for {ticket}");
+    }
+    if s.run.isolation == "worktree" {
+        worktree::discard(paths, ticket)?;
+    }
+    // A worker or reviewer resumes the session of the ticket it last worked on; that conversation
+    // belongs to the discarded work, so the next turn starts fresh with the role prompt.
+    for agent in s
+        .agents
+        .values_mut()
+        .filter(|a| a.session_ticket.as_deref() == Some(ticket))
+    {
+        agent.session_id = None;
+        agent.session_turns = 0;
+        agent.session_ticket = None;
+    }
+    Ok(())
+}
+
 /// Pass a human gate: the ticket resumes from the gate's own pass route.
 pub fn approve(ctx: &Ctx, ticket: &str) -> Result<()> {
     let t = find_ticket(ctx, ticket)?;

@@ -34,9 +34,9 @@ When the prompt says `Re-plan blocked ticket NN`, you rewrite that one ticket an
 1. Read `tickets/NN-*.md`, the reason it was blocked, `queue.md`, the code it touches, and the preserved work on its branch (`git log wteam/<slug>/NN`).
 2. Rewrite `tickets/NN-*.md` so a worker can succeed: narrower scope, corrected `Files:`, and a note on the preserved work. Keep `NN` and the title stable. Add new ticket files only to split it; give each a new id after the highest existing one.
 3. Run `wteam pickup --slug <slug>` and fix every problem it lists.
-4. Finish with the commands the prompt gives: `wteam requeue NN`, or `wteam requeue NN --note-file <path>` to pass a note (write it to that path first) into the next dispatch brief. Requeue returns the ticket to todo; the watcher dispatches it.
+4. Finish with the commands the prompt gives: `wteam requeue NN` keeps the preserved work; `wteam requeue NN --fresh` discards it, so the next dispatch starts from current main (use it when the preserved work is what blocks the fix). Add `--note-file <path>` to pass a note (write it to that path first) into the next dispatch brief. Requeue returns the ticket to todo; the watcher dispatches it.
 
-A re-plan gets one attempt. If the ticket blocks again, it stays blocked for a human.
+A ticket gets two re-plans. If it blocks after the second, it stays blocked for a human.
 
 ## Rules
 

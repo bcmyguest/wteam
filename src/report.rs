@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use crate::paths::Paths;
 use crate::state::TicketStatus;
+use crate::watcher::REPLAN_BUDGET;
 use crate::work;
 
 /// Occurrences at which a follow-up key becomes a ticket.
@@ -146,8 +147,15 @@ pub fn stop_report(paths: &Paths) -> Result<String> {
             s(b, "reason"),
             s(b, "action")
         ));
-        if b["replans"].as_u64().unwrap_or(0) > 0 {
-            out.push_str("  replan: re-planned once; the planner's re-plan did not unblock it\n");
+        let replans = b["replans"].as_u64().unwrap_or(0);
+        if replans >= u64::from(REPLAN_BUDGET) {
+            out.push_str(&format!(
+                "  replan: budget exhausted, {replans} re-plans spent; the planner's re-plans did not unblock it\n"
+            ));
+        } else if replans > 0 {
+            out.push_str(&format!(
+                "  replan: {replans} of {REPLAN_BUDGET} re-plans spent\n"
+            ));
         }
     }
     out.push_str(&format!(

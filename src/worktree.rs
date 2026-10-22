@@ -233,6 +233,39 @@ pub fn merge_back(paths: &Paths, pair: u32, ticket: &str) -> Result<MergeOutcome
     Ok(MergeOutcome::Merged(sha))
 }
 
+/// Discard `ticket`'s preserved work: remove the worktree that holds its branch (if any) and
+/// delete the branch. Main is never touched. The caller checks that no turn is running on it.
+pub fn discard(paths: &Paths, ticket: &str) -> Result<()> {
+    let _lock = lock(paths)?;
+    let branch = branch(&paths.slug, ticket);
+    git(&paths.root, &["worktree", "prune"])?;
+    if let Some(pair) = holders(paths)?.get(ticket) {
+        git(
+            &paths.root,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                &path(paths, *pair).to_string_lossy(),
+            ],
+        )?;
+    }
+    let exists = git(
+        &paths.root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+    .is_ok();
+    if exists {
+        git(&paths.root, &["branch", "-D", &branch])?;
+    }
+    Ok(())
+}
+
 /// After a landing conflict: move pair `pair`'s ticket work onto main's HEAD as uncommitted
 /// edits. The ticket branch (one squashed commit) is reset to main, then its commit is
 /// cherry-picked without committing, so conflicting files hold the usual markers. Main is never

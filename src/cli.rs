@@ -181,6 +181,10 @@ pub struct RequeueArgs {
     /// File holding the guidance, read as-is; relative to the current directory.
     #[arg(long = "note-file", conflicts_with = "note")]
     pub note_file: Option<PathBuf>,
+    /// Also discard the ticket's preserved work: remove its worktree and delete its branch, so
+    /// the next dispatch starts from current main.
+    #[arg(long)]
+    pub fresh: bool,
 }
 
 #[derive(Debug, Args)]

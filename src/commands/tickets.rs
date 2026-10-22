@@ -212,6 +212,10 @@ pub fn requeue(g: &Global, a: &RequeueArgs) -> Result<Out> {
                 status.as_str().unwrap_or("not blocked")
             );
         }
+        if a.fresh {
+            engine::discard_preserved(&paths, s, &ticket)?;
+        }
+        let ts = s.ticket_mut(&ticket);
         ts.status = TicketStatus::Todo;
         ts.rounds = 0;
         ts.dispatch_failures = 0;

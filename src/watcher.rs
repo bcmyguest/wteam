@@ -28,6 +28,8 @@ const POLL: Duration = Duration::from_millis(200);
 const ORCHESTRATOR: &str = "orchestrator.1";
 /// Instance id of the planner that re-plans blocked tickets under `--replan`.
 const PLANNER: &str = "planner.1";
+/// Planner re-plans allowed per ticket under `--replan`.
+pub const REPLAN_BUDGET: u32 = 2;
 /// Sent once per generation, when its context passes the handoff threshold.
 const HANDOFF_PROMPT: &str = "Your context is nearly full. Write your handoff baton now, with these sections: Goal, Confirmed facts, Ruled out, Next steps, Constraints, Blockers. Reply with the baton only.";
 /// Ends every kickoff and digest.
@@ -200,7 +202,7 @@ fn drive_auto(ctx: &Ctx, opts: &RunOptions, failed: &mut DispatchFailures) -> Re
     }
 }
 
-/// `--replan`: give each blocked ticket with no re-plan spent one planner turn. The planner
+/// `--replan`: give each blocked ticket with re-plans left one planner turn. The planner
 /// requeues the ticket when it can make it succeed; otherwise it stays blocked. Returns a stop
 /// reason when a planner turn fails.
 fn replan_blocked(ctx: &Ctx) -> Result<Option<String>> {
@@ -212,7 +214,7 @@ fn replan_blocked(ctx: &Ctx) -> Result<Option<String>> {
     let due: Vec<(String, String)> = s
         .tickets
         .iter()
-        .filter(|(_, ts)| ts.status == TicketStatus::Blocked && ts.replans == 0)
+        .filter(|(_, ts)| ts.status == TicketStatus::Blocked && ts.replans < REPLAN_BUDGET)
         .map(|(id, ts)| (id.clone(), ts.blocked_reason.clone().unwrap_or_default()))
         .collect();
     for (id, reason) in due {
@@ -272,7 +274,7 @@ fn replan_prompt(
     });
     let note = paths.effort_dir().join(format!("requeue-{id}.md"));
     format!(
-        "Re-plan blocked ticket {id} ({title}). Reason: {reason}. Ticket file: {ticket}. Queue: {queue}{queue_note}. Branch: {branch} (preserved work: `git log {branch}`).{worktree_note} Rewrite the ticket file so it can succeed (narrower scope, corrected Files, notes on preserved work); split it only by adding new ticket files. Run `wteam pickup --slug {slug}` until it lists no problems. Then finish with `wteam requeue {id}`, or, to pass a note into the next dispatch brief, write it to {note} and run `wteam requeue {id} --note-file {note}`.",
+        "Re-plan blocked ticket {id} ({title}). Reason: {reason}. Ticket file: {ticket}. Queue: {queue}{queue_note}. Branch: {branch} (preserved work: `git log {branch}`).{worktree_note} Rewrite the ticket file so it can succeed (narrower scope, corrected Files, notes on preserved work); split it only by adding new ticket files. Run `wteam pickup --slug {slug}` until it lists no problems. Then finish with `wteam requeue {id}` (keeps the preserved work) or `wteam requeue {id} --fresh` (discards it, so the next dispatch starts from main; use it when the preserved work is what blocks the fix). To pass a note into the next dispatch brief, write it to {note} and run `wteam requeue {id} --note-file {note}` (or add `--fresh` before `--note-file`).",
         ticket = ticket_path.display(),
         queue = queue.display(),
         note = note.display(),
