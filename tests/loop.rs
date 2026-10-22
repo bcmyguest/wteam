@@ -624,3 +624,130 @@ fn verdict_file_missing_or_findingless_fail_leaves_state_unchanged() {
     assert_eq!(st["tickets"]["01"]["rounds"], 0);
     r.write(".wteam-fake/go", "");
 }
+
+/// Worker for the session tests. Reads the ticket it works on from `task`. Each turn records
+/// `session|role` (role marks a turn that carried the role prompt). With `block-01` present and
+/// `blocked-once` absent, it blocks ticket 01 once instead of submitting.
+const SESSION_WORKER: &str = r#"
+t=$(cat "$WTEAM_FAKE_DIR/task")
+printf '%s|%s\n' "$WTEAM_SESSION" "${WTEAM_ROLE_PROMPT:+role}" >> "$WTEAM_FAKE_DIR/worker-sessions"
+if [ "$t" = 01 ] && [ -e "$WTEAM_FAKE_DIR/block-01" ] && [ ! -e "$WTEAM_FAKE_DIR/blocked-once" ]; then
+  touch "$WTEAM_FAKE_DIR/blocked-once"
+  wteam block 01 --reason "need schema"
+  echo "session: S1"
+  exit 0
+fi
+mkdir -p src
+echo edit >> "src/$t.txt"
+wteam submit "$t" --summary "did $t" || exit 1
+echo "session: S1"
+"#;
+
+/// Reviewer that passes whatever ticket its request names and records `session|role` per turn.
+/// It FAILs ticket 02 once when `fail-02` is set.
+const SESSION_REVIEWER: &str = r#"
+t=$(printf '%s' "$WTEAM_PROMPT" | sed -n 's/.*Review request: ticket \([0-9]*\).*/\1/p' | head -n 1)
+printf '%s|%s\n' "$WTEAM_SESSION" "${WTEAM_ROLE_PROMPT:+role}" >> "$WTEAM_FAKE_DIR/reviewer-sessions"
+if [ "$t" = 02 ] && [ -e "$WTEAM_FAKE_DIR/fail-02" ] && [ ! -e "$WTEAM_FAKE_DIR/failed-02" ]; then
+  touch "$WTEAM_FAKE_DIR/failed-02"
+  wteam verdict 02 fail --finding "handle the empty case" || exit 1
+else
+  wteam verdict "$t" pass || exit 1
+fi
+echo "session: R1"
+"#;
+
+fn session_repo() -> Repo {
+    let r = Repo::new("demo");
+    r.ticket("01", "First", "None", "src/01.txt", "true");
+    r.ticket("02", "Second", "None", "src/02.txt", "true");
+    r.use_fake_agents();
+    r.agent_script("worker", SESSION_WORKER);
+    r.agent_script("reviewer", SESSION_REVIEWER);
+    r.write(".wteam-fake/task", "01");
+    r
+}
+
+fn session_lines(r: &Repo, file: &str) -> Vec<String> {
+    std::fs::read_to_string(r.fake_dir().join(file))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+fn idle_and_done(r: &Repo, ticket: &str) {
+    r.wait_for(30, |s| {
+        s["tickets"][ticket]["status"] == "done"
+            && s["agents"]["worker.1"]["busy"] == false
+            && s["agents"]["reviewer.1"]["busy"] == false
+    });
+}
+
+#[test]
+fn new_ticket_starts_fresh_and_fail_fix_resumes_the_same_session() {
+    let r = session_repo();
+    r.write(".wteam-fake/fail-02", "");
+    dispatch(&r, "01");
+    idle_and_done(&r, "01");
+    r.write(".wteam-fake/task", "02");
+    dispatch(&r, "02");
+    idle_and_done(&r, "02");
+
+    // 01 starts fresh with the role prompt. 02 is a new ticket, so it starts fresh too. Its
+    // fix turn after the FAIL resumes the session that now belongs to 02.
+    assert_eq!(
+        session_lines(&r, "worker-sessions"),
+        vec!["|role", "|role", "S1|"]
+    );
+    // The reviewer's round 1 on 02 starts fresh; its round 2 resumes.
+    assert_eq!(
+        session_lines(&r, "reviewer-sessions"),
+        vec!["|role", "|role", "R1|"]
+    );
+}
+
+#[test]
+fn requeued_ticket_resumes_its_session_when_no_other_ticket_ran() {
+    let r = session_repo();
+    r.write(".wteam-fake/block-01", "");
+    dispatch(&r, "01");
+    r.wait_for(30, |s| {
+        s["tickets"]["01"]["status"] == "blocked" && s["agents"]["worker.1"]["busy"] == false
+    });
+    r.wteam()
+        .args(["requeue", "01", "--note", "retry"])
+        .assert()
+        .success();
+    dispatch(&r, "01");
+    idle_and_done(&r, "01");
+
+    // The blocked turn belonged to 01, so the requeued 01 resumes it.
+    assert_eq!(session_lines(&r, "worker-sessions"), vec!["|role", "S1|"]);
+}
+
+#[test]
+fn requeued_ticket_starts_fresh_when_its_worker_ran_another_ticket() {
+    let r = session_repo();
+    r.write(".wteam-fake/block-01", "");
+    dispatch(&r, "01");
+    r.wait_for(30, |s| {
+        s["tickets"]["01"]["status"] == "blocked" && s["agents"]["worker.1"]["busy"] == false
+    });
+    r.write(".wteam-fake/task", "02");
+    dispatch(&r, "02");
+    idle_and_done(&r, "02");
+    r.write(".wteam-fake/task", "01");
+    r.wteam()
+        .args(["requeue", "01", "--note", "retry"])
+        .assert()
+        .success();
+    dispatch(&r, "01");
+    idle_and_done(&r, "01");
+
+    // The session now belongs to 02, so the requeued 01 starts fresh.
+    assert_eq!(
+        session_lines(&r, "worker-sessions"),
+        vec!["|role", "|role", "|role"]
+    );
+}

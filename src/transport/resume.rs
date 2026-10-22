@@ -172,6 +172,17 @@ pub fn release(s: &mut State, agent: &str) {
     st.turn_spawned_at = None;
 }
 
+/// Point `st`'s session at `ticket`. A session that works on another ticket is dropped, so the
+/// next turn starts fresh with the role prompt. The same ticket keeps its session (a FAIL fix,
+/// a landing-conflict return or a requeue of the same ticket resumes it).
+pub fn bind_session(st: &mut crate::state::AgentState, ticket: &str) {
+    if st.session_ticket.as_deref() != Some(ticket) {
+        st.session_id = None;
+        st.session_turns = 0;
+        st.session_ticket = Some(ticket.to_string());
+    }
+}
+
 /// What the loop does when an agent's mailbox has no undelivered mail.
 enum Settle {
     /// Nothing held: the agent goes idle.
@@ -228,7 +239,16 @@ pub fn run_turns(ctx: &Ctx, agent: &str) -> Result<()> {
             }
             let (text, end) = crate::mailbox::read_from(&ctx.paths, agent, st.mail_delivered)?;
             if !text.trim().is_empty() {
-                let first = st.session_id.is_none() && st.turns == 0;
+                if !matches!(role.as_str(), "orchestrator" | "planner") {
+                    let latest = crate::mailbox::parse(&text)
+                        .into_iter()
+                        .rev()
+                        .find_map(|m| m.ticket);
+                    if let Some(ticket) = latest {
+                        bind_session(st, &ticket);
+                    }
+                }
+                let first = st.session_id.is_none() && st.session_turns == 0;
                 st.mail_delivered = end;
                 let turn = st.turns + 1;
                 let session = st.session_id.clone();
@@ -429,6 +449,7 @@ pub fn one_turn(
         st.context_tokens = tokens.or(st.context_tokens);
         st.tokens_total += tokens.unwrap_or(0);
         st.turns += 1;
+        st.session_turns += 1;
         Ok(())
     })?;
     Ok(out.text)
@@ -629,6 +650,23 @@ mod tests {
         let d =
             state::with_state(&paths, |s| Ok(record_or_kill(s, "worker.1", newer, 7777))).unwrap();
         assert_eq!(d, Decision::Recorded);
+    }
+
+    #[test]
+    fn bind_session_drops_only_another_tickets_session() {
+        let mut st = crate::state::AgentState {
+            session_id: Some("S1".into()),
+            session_turns: 2,
+            session_ticket: Some("01".into()),
+            ..Default::default()
+        };
+        bind_session(&mut st, "01");
+        assert_eq!(st.session_id.as_deref(), Some("S1"));
+        assert_eq!(st.session_turns, 2);
+        bind_session(&mut st, "02");
+        assert_eq!(st.session_id, None);
+        assert_eq!(st.session_turns, 0);
+        assert_eq!(st.session_ticket.as_deref(), Some("02"));
     }
 
     #[test]

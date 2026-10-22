@@ -28,6 +28,12 @@ impl Adapter for Fake {
                 req.session_id.clone().unwrap_or_default(),
             ),
         ];
+        // Always set, empty when this turn has no role prompt: a parent turn's value would
+        // otherwise leak through the inherited environment into a child turn.
+        env.push((
+            "WTEAM_ROLE_PROMPT".to_string(),
+            req.role_prompt.clone().unwrap_or_default(),
+        ));
         env.extend(req.env.iter().cloned());
         CommandSpec {
             program: "sh".into(),

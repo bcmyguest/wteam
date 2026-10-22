@@ -103,6 +103,14 @@ pub struct AgentState {
     pub context_tokens: Option<u64>,
     #[serde(default)]
     pub turns: u32,
+    /// Ticket the current session works on. A worker or reviewer handed another ticket starts a
+    /// fresh session.
+    #[serde(default)]
+    pub session_ticket: Option<String>,
+    /// Turns run in the current session. Zero means the next turn carries the role prompt.
+    /// Reset with the session, unlike `turns`, which numbers the log files.
+    #[serde(default)]
+    pub session_turns: u32,
     /// Sum of the per-turn context sizes (`context_tokens`) the CLI reports, over all turns.
     /// It is not billed input or output tokens.
     #[serde(default)]
