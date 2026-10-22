@@ -6,6 +6,7 @@
 //! loop waits for workers and reviewers, then resumes it with a digest.
 
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -13,6 +14,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::engine::Ctx;
 use crate::mailbox;
+use crate::paths::Paths;
 use crate::state::{self, Event, EventKind, State, TicketStatus};
 use crate::team::agents::{self, AgentDef};
 use crate::team::{NodeKind, parse_instance};
@@ -206,16 +208,28 @@ fn replan_blocked(ctx: &Ctx) -> Result<Option<String>> {
         .map(|(id, ts)| (id.clone(), ts.blocked_reason.clone().unwrap_or_default()))
         .collect();
     for (id, reason) in due {
-        let title = tickets
-            .iter()
-            .find(|t| t.id == id)
-            .map_or_else(String::new, |t| t.title.clone());
+        let ticket = tickets.iter().find(|t| t.id == id);
+        let title = ticket.map_or_else(String::new, |t| t.title.clone());
+        let ticket_path = ticket.map_or_else(PathBuf::new, |t| t.path.clone());
+        let pair = if s.run.isolation == "worktree" {
+            s.tickets.get(&id).and_then(|ts| ts.pair)
+        } else {
+            None
+        };
         // The budget is spent before the turn, so a failed planner is never retried.
         state::with_state(&ctx.paths, |s| {
             s.ticket_mut(&id).replans += 1;
             Ok(())
         })?;
-        let prompt = replan_prompt(&ctx.paths.slug, &id, &title, &reason);
+        let prompt = replan_prompt(
+            &ctx.paths,
+            &id,
+            &title,
+            &ticket_path,
+            pair,
+            &reason,
+            ctx.paths.queue_file().exists(),
+        );
         if let Err(e) = planner_turn(ctx, &prompt) {
             return Ok(Some(format!("re-plan of {id} failed: {e:#}")));
         }
@@ -224,9 +238,36 @@ fn replan_blocked(ctx: &Ctx) -> Result<Option<String>> {
 }
 
 /// The planner's prompt for one blocked ticket. Its role prompt rides on the first turn only.
-fn replan_prompt(slug: &str, id: &str, title: &str, reason: &str) -> String {
+/// It names exact paths and finish commands, so the planner never lists directories.
+fn replan_prompt(
+    paths: &Paths,
+    id: &str,
+    title: &str,
+    ticket_path: &Path,
+    pair: Option<u32>,
+    reason: &str,
+    queue_exists: bool,
+) -> String {
+    let slug = &paths.slug;
+    let branch = worktree::branch(slug, id);
+    let queue = paths.queue_file();
+    let queue_note = if queue_exists {
+        ""
+    } else {
+        " (queue.md does not exist yet)"
+    };
+    let worktree_note = pair.map_or_else(String::new, |n| {
+        format!(
+            " The preserved work sits in pair {n}'s worktree: {}.",
+            worktree::path(paths, n).display()
+        )
+    });
+    let note = paths.effort_dir().join(format!("requeue-{id}.md"));
     format!(
-        "Re-plan blocked ticket {id} ({title}). Reason: {reason}. Read the ticket, its branch's preserved work (`git log wteam/{slug}/{id}`), `queue.md`, and the current code. Rewrite `tickets/{id}-*.md` so it can succeed (narrower scope, corrected Files, notes on preserved work), optionally split it by adding new ticket files; then run `wteam pickup --slug {slug}` until it lists no problems, then `wteam requeue {id}`."
+        "Re-plan blocked ticket {id} ({title}). Reason: {reason}. Ticket file: {ticket}. Queue: {queue}{queue_note}. Branch: {branch} (preserved work: `git log {branch}`).{worktree_note} Rewrite the ticket file so it can succeed (narrower scope, corrected Files, notes on preserved work); split it only by adding new ticket files. Run `wteam pickup --slug {slug}` until it lists no problems. Then finish with `wteam requeue {id}`, or, to pass a note into the next dispatch brief, write it to {note} and run `wteam requeue {id} --note-file {note}`.",
+        ticket = ticket_path.display(),
+        queue = queue.display(),
+        note = note.display(),
     )
 }
 
@@ -574,4 +615,60 @@ pub fn format_events(events: &[Event]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::replan_prompt;
+    use crate::paths::Paths;
+
+    fn prompt(pair: Option<u32>, queue_exists: bool) -> String {
+        replan_prompt(
+            &Paths::new("/repo", "demo"),
+            "01",
+            "Ticket one",
+            Path::new("/repo/.wteam/demo/tickets/01-ticket-one.md"),
+            pair,
+            "needs spec",
+            queue_exists,
+        )
+    }
+
+    #[test]
+    fn replan_prompt_names_the_exact_ticket_file_and_branch() {
+        let p = prompt(None, true);
+        assert!(
+            p.contains("/repo/.wteam/demo/tickets/01-ticket-one.md"),
+            "{p}"
+        );
+        assert!(p.contains("wteam/demo/01"), "{p}");
+        assert!(p.contains("/repo/.wteam/demo/queue.md"), "{p}");
+        assert!(!p.contains("does not exist"), "{p}");
+        assert!(!p.contains("worktrees"), "{p}");
+    }
+
+    #[test]
+    fn replan_prompt_names_the_pair_worktree_under_isolation() {
+        let p = prompt(Some(2), true);
+        assert!(p.contains("/repo/.wteam/demo/worktrees/pair2"), "{p}");
+    }
+
+    #[test]
+    fn replan_prompt_says_when_queue_is_missing() {
+        let p = prompt(None, false);
+        assert!(p.contains("queue.md does not exist"), "{p}");
+    }
+
+    #[test]
+    fn replan_prompt_gives_the_exact_finish_commands() {
+        let p = prompt(None, true);
+        assert!(p.contains("wteam pickup --slug demo"), "{p}");
+        assert!(
+            p.contains("wteam requeue 01 --note-file /repo/.wteam/demo/requeue-01.md"),
+            "{p}"
+        );
+        assert!(p.contains("wteam requeue 01`"), "{p}");
+    }
 }

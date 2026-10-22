@@ -178,6 +178,9 @@ pub struct RequeueArgs {
     /// Guidance included in the next dispatch brief.
     #[arg(long)]
     pub note: Option<String>,
+    /// File holding the guidance, read as-is; relative to the current directory.
+    #[arg(long = "note-file", conflicts_with = "note")]
+    pub note_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

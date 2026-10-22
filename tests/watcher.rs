@@ -829,3 +829,26 @@ fn wteam_dir_writes_do_not_dirty_pickup() {
     let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
     assert!(text.contains("git tree is dirty: stray.txt"), "{text}");
 }
+
+#[test]
+fn replan_prompt_reaches_the_planner_with_exact_paths() {
+    let r = one_ticket();
+    r.agent_script("worker", BLOCK_UNTIL_REPLANNED);
+    r.agent_script(
+        "planner",
+        r#"printf '%s' "$WTEAM_PROMPT" > "$WTEAM_FAKE_DIR/planner-prompt"
+echo done > "$WTEAM_FAKE_DIR/replanned"
+wteam requeue 01 || exit 1
+"#,
+    );
+
+    run_ok(&r, &["--dispatch", "auto", "--replan"]);
+
+    let prompt = r.read(".wteam-fake/planner-prompt");
+    assert!(
+        prompt.contains(".wteam/demo/tickets/01-ticket-one.md"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("wteam/demo/01"), "{prompt}");
+    assert!(prompt.contains("wteam requeue 01"), "{prompt}");
+}

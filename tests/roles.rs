@@ -353,3 +353,21 @@ fn replan_sections_name_their_commands() {
     );
     assert_mentions("orchestrator", &["--replan"]);
 }
+
+#[test]
+fn planner_shares_the_worker_shell_rules() {
+    let shared = [
+        "Run exactly one command per shell call: no `&&`, `;` or `|`.",
+        "Never run a multi-line command.",
+        "Never write file contents through the shell",
+    ];
+    assert_mentions("worker", &shared);
+    assert_mentions("planner", &shared);
+    assert_mentions(
+        "planner",
+        &[
+            "A denied command means that command, not all of Bash: split it and retry once",
+            "file-editing tool",
+        ],
+    );
+}

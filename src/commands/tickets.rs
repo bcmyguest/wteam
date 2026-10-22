@@ -164,6 +164,10 @@ fn parse_follow_up(f: &str) -> Result<(String, String)> {
 
 /// Move a blocked ticket back to todo: reset rounds and holder, store the note.
 pub fn requeue(g: &Global, a: &RequeueArgs) -> Result<Out> {
+    let note = match &a.note_file {
+        Some(p) => Some(read_input(p, "note")?),
+        None => a.note.clone(),
+    };
     let paths = super::effort(g)?;
     let ticket = crate::work::load_tickets(&paths.tickets_dir())?
         .into_iter()
@@ -184,7 +188,7 @@ pub fn requeue(g: &Global, a: &RequeueArgs) -> Result<Out> {
         ts.assignee = None;
         ts.pair = None;
         ts.blocked_reason = None;
-        ts.note = a.note.clone();
+        ts.note = note;
         Ok(ts.clone())
     })?;
     let mut value = serde_json::to_value(&state)?;

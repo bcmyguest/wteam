@@ -18,7 +18,7 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `submit <ticket>` | Hand a finished round to review (`--summary <text>` or `--summary-file <path>`) |
 | `verdict <ticket> pass\|fail` | Record a verdict (`--file <path>` with FINDINGS/NOTES/FOLLOW-UPS sections, or `--finding`, `--note`, `--follow-up`) |
 | `block <ticket>` | Mark a ticket blocked (`--reason <text>` or `--reason-file <path>`) |
-| `requeue <ticket>` | Return a blocked ticket to todo (`--note <text>`) |
+| `requeue <ticket>` | Return a blocked ticket to todo (`--note <text>` or `--note-file <path>`, not both) |
 | `approve <ticket>` | Pass a human gate; the ticket resumes from the gate's pass route |
 | `send <to> <message>` | Message another agent |
 | `inbox` | Read mail (`--all` for the whole mailbox) |

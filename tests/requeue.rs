@@ -114,3 +114,42 @@ fn requeue_rejects_every_status_but_blocked() {
             .stderr(contains(status));
     }
 }
+
+#[test]
+fn requeue_note_file_carries_shell_metacharacters_into_the_brief() {
+    let r = repo();
+    block_01(&r);
+    let note = "use $(echo X) && `rm -rf z` | cat ; \"quoted\"\nsecond line";
+    r.write(".wteam/demo/requeue-01.md", note);
+    let path = r.path().join(".wteam/demo/requeue-01.md");
+    r.wteam()
+        .args(["requeue", "01", "--note-file"])
+        .arg(&path)
+        .assert()
+        .success();
+    assert_eq!(r.state()["tickets"]["01"]["note"], note);
+
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(30, |s| {
+        s["agents"]["worker.1"]["turns"].as_u64().unwrap_or(0) >= 2
+    });
+    let prompts = std::fs::read_to_string(r.fake_dir().join("worker-prompts")).unwrap();
+    let second = prompts.split("=====\n").nth(1).unwrap_or_default();
+    assert!(second.contains(note), "{prompts}");
+}
+
+#[test]
+fn requeue_note_and_note_file_together_is_a_usage_error() {
+    let r = repo();
+    block_01(&r);
+    r.write(".wteam/demo/requeue-01.md", "from file");
+    let path = r.path().join(".wteam/demo/requeue-01.md");
+    r.wteam()
+        .args(["requeue", "01", "--note", "inline", "--note-file"])
+        .arg(&path)
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(contains("cannot be used with"));
+    assert_eq!(r.state()["tickets"]["01"]["status"], "blocked");
+}

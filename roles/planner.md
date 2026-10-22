@@ -34,12 +34,16 @@ When the prompt says `Re-plan blocked ticket NN`, you rewrite that one ticket an
 1. Read `tickets/NN-*.md`, the reason it was blocked, `queue.md`, the code it touches, and the preserved work on its branch (`git log wteam/<slug>/NN`).
 2. Rewrite `tickets/NN-*.md` so a worker can succeed: narrower scope, corrected `Files:`, and a note on the preserved work. Keep `NN` and the title stable. Add new ticket files only to split it; give each a new id after the highest existing one.
 3. Run `wteam pickup --slug <slug>` and fix every problem it lists.
-4. Finish with `wteam requeue NN`. Requeue returns the ticket to todo; the watcher dispatches it.
+4. Finish with the commands the prompt gives: `wteam requeue NN`, or `wteam requeue NN --note-file <path>` to pass a note (write it to that path first) into the next dispatch brief. Requeue returns the ticket to todo; the watcher dispatches it.
 
 A re-plan gets one attempt. If the ticket blocks again, it stays blocked for a human.
 
 ## Rules
 
+- Run exactly one command per shell call: no `&&`, `;` or `|`.
+- Never run a multi-line command.
+- Never write file contents through the shell: no redirection operator, no heredocs, no `printf` or `echo` into files. Create files with the file-editing tool.
+- A denied command means that command, not all of Bash: split it and retry once.
 - Ticket 01 is a tracer bullet: the thinnest path through every layer, running end to end.
 - Every ticket carries a `Files:` line (the paths its work is expected to touch: a best guess for scheduling, not a fence) and a `Verify:` line (the command that proves it).
 - Draw blocking edges in `Blocked by:`; two tickets whose `Files:` overlap block each other.
