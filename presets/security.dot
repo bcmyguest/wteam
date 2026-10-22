@@ -1,0 +1,18 @@
+// worker -> tests -> reviewer -> security reviewer; both reviewers must pass.
+digraph security {
+  graph [max_visits=3, handoff_tokens=150000]
+  planner      [agent="planner"]
+  orchestrator [agent="orchestrator"]
+  worker       [agent="worker", count="$pairs"]
+  tests        [shape=parallelogram, script="cargo test"]
+  reviewer     [agent="reviewer", count="$pairs"]
+  security     [agent="reviewer", count="$pairs", prompt="Review the change for security flaws: injection, unsafe input handling, secrets, privilege and path traversal. Pass only when none remain."]
+  orchestrator -> worker   [on=dispatch, kind=broadcast]
+  worker -> tests          [on=submit]
+  tests -> reviewer        [kind=pair]
+  reviewer -> security     [on=pass, kind=pair]
+  reviewer -> worker       [on=fail, kind=pair]
+  security -> worker       [on=fail, kind=pair]
+  security -> orchestrator [on=pass, kind=fan-in]
+  worker -> orchestrator   [on=blocked, kind=fan-in]
+}

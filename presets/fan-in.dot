@@ -1,0 +1,13 @@
+// N workers share one reviewer.
+digraph fan_in {
+  graph [max_visits=3, handoff_tokens=150000]
+  planner      [agent="planner"]
+  orchestrator [agent="orchestrator"]
+  worker       [agent="worker", count="$pairs"]
+  reviewer     [agent="reviewer", count=1]
+  orchestrator -> worker   [on=dispatch, kind=broadcast]
+  worker -> reviewer       [on=submit, kind=fan-in]
+  reviewer -> worker       [on=fail, kind=pair]
+  reviewer -> orchestrator [on=pass, kind=fan-in]
+  worker -> orchestrator   [on=blocked, kind=fan-in]
+}

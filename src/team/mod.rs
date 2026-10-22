@@ -5,7 +5,7 @@ pub mod dot;
 
 use std::collections::BTreeMap;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use serde::Serialize;
 
 /// Events agents emit on a ticket; edges route on them.
@@ -35,6 +35,18 @@ impl TeamEvent {
             _ => return None,
         })
     }
+
+    /// Lowercase name, as written in DOT `on=`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dispatch => "dispatch",
+            Self::Submit => "submit",
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::Blocked => "blocked",
+            Self::Message => "message",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -46,6 +58,26 @@ pub enum LinkKind {
     FanIn,
     /// One sender reaches every instance.
     Broadcast,
+}
+
+impl LinkKind {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "pair" => Self::Pair,
+            "fan-in" | "fan_in" => Self::FanIn,
+            "broadcast" => Self::Broadcast,
+            _ => return None,
+        })
+    }
+
+    /// Name as written in DOT `kind=`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Pair => "pair",
+            Self::FanIn => "fan-in",
+            Self::Broadcast => "broadcast",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -152,8 +184,89 @@ impl Team {
 
     /// Build a team from a parsed DOT graph, substituting `$pairs` in `count`.
     pub fn from_graph(graph: &dot::Graph, pairs: u32) -> Result<Team> {
-        let _ = (graph, pairs);
-        bail!("not implemented: Team::from_graph")
+        let num = |key: &str, default: u64| -> Result<u64> {
+            match graph.attrs.get(key) {
+                None => Ok(default),
+                Some(v) => v
+                    .parse()
+                    .map_err(|_| anyhow!("graph attribute {key}={v:?} is not an integer")),
+            }
+        };
+        let max_visits = u32::try_from(num("max_visits", 3)?)
+            .map_err(|_| anyhow!("graph attribute max_visits is too large"))?;
+        let handoff_tokens = num("handoff_tokens", 150_000)?;
+
+        let mut roles = BTreeMap::new();
+        for node in &graph.nodes {
+            let a = &node.attrs;
+            let get = |k: &str| a.get(k).cloned();
+            let kind = match a.get("shape").map(String::as_str).unwrap_or("box") {
+                "box" => {
+                    let count = match a.get("count").map(String::as_str) {
+                        None => 1,
+                        Some("$pairs") => pairs,
+                        Some(v) => v.parse().map_err(|_| {
+                            anyhow!("node {}: count={v:?} is not an integer or $pairs", node.id)
+                        })?,
+                    };
+                    NodeKind::Agent {
+                        agent: get("agent").unwrap_or_else(|| node.id.clone()),
+                        count,
+                        profile: get("profile"),
+                        prompt: get("prompt"),
+                    }
+                }
+                "parallelogram" => NodeKind::Command {
+                    script: get("script").ok_or_else(|| {
+                        anyhow!("node {}: shape=parallelogram needs script=", node.id)
+                    })?,
+                },
+                "hexagon" => NodeKind::Human,
+                other => bail!(
+                    "node {}: unknown shape {other:?} (box, parallelogram, hexagon)",
+                    node.id
+                ),
+            };
+            roles.insert(
+                node.id.clone(),
+                Role {
+                    name: node.id.clone(),
+                    kind,
+                    label: get("label"),
+                },
+            );
+        }
+
+        let mut links = Vec::new();
+        for e in &graph.edges {
+            let on = match e.attrs.get("on") {
+                None => None,
+                Some(v) => Some(
+                    TeamEvent::parse(v)
+                        .ok_or_else(|| anyhow!("edge {} -> {}: unknown on={v:?}", e.from, e.to))?,
+                ),
+            };
+            let kind = match e.attrs.get("kind") {
+                None => LinkKind::Pair,
+                Some(v) => LinkKind::parse(v)
+                    .ok_or_else(|| anyhow!("edge {} -> {}: unknown kind={v:?}", e.from, e.to))?,
+            };
+            links.push(Link {
+                from: e.from.clone(),
+                to: e.to.clone(),
+                on,
+                kind,
+                label: e.attrs.get("label").cloned(),
+            });
+        }
+
+        Ok(Team {
+            name: graph.name.clone(),
+            roles,
+            links,
+            max_visits,
+            handoff_tokens,
+        })
     }
 
     /// Outgoing links from `role` that route `event`.
@@ -203,6 +316,91 @@ pub fn parse_instance(id: &str) -> (String, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn team(src: &str, pairs: u32) -> Result<Team> {
+        Team::from_graph(&dot::parse(src).unwrap(), pairs)
+    }
+
+    #[test]
+    fn default_preset_matches_default_topology() {
+        let src = crate::config::preset("default").unwrap();
+        let mut t = team(src, 3).unwrap();
+        t.name = "default".into();
+        assert_eq!(t, Team::default_topology(3));
+    }
+
+    #[test]
+    fn every_preset_parses() {
+        for name in crate::config::PRESETS {
+            let t = team(crate::config::preset(name).unwrap(), 2).unwrap();
+            assert_eq!(t.count("worker"), 2, "{name}");
+        }
+    }
+
+    #[test]
+    fn shapes_map_to_node_kinds() {
+        let t = team(
+            "digraph t { a; b [shape=parallelogram, script=\"make\"]; c [shape=hexagon]; d [agent=x, count=2, profile=full, prompt=hi, label=D] }",
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            t.roles["a"].kind,
+            NodeKind::Agent {
+                agent: "a".into(),
+                count: 1,
+                profile: None,
+                prompt: None
+            }
+        );
+        assert_eq!(
+            t.roles["b"].kind,
+            NodeKind::Command {
+                script: "make".into()
+            }
+        );
+        assert_eq!(t.roles["c"].kind, NodeKind::Human);
+        assert_eq!(t.count("d"), 2);
+        assert_eq!(t.roles["d"].label.as_deref(), Some("D"));
+    }
+
+    #[test]
+    fn edge_defaults_and_attrs() {
+        let t = team(
+            "digraph t { a -> b; b -> c [on=pass, kind=fan-in, label=ok] }",
+            1,
+        )
+        .unwrap();
+        assert_eq!((t.links[0].on, t.links[0].kind), (None, LinkKind::Pair));
+        assert_eq!(t.links[1].on, Some(TeamEvent::Pass));
+        assert_eq!(t.links[1].kind, LinkKind::FanIn);
+        assert_eq!(t.links[1].label.as_deref(), Some("ok"));
+        assert_eq!((t.max_visits, t.handoff_tokens), (3, 150_000));
+    }
+
+    #[test]
+    fn graph_limits_override_defaults() {
+        let t = team(
+            "digraph t { graph [max_visits=5, handoff_tokens=1000] a }",
+            1,
+        )
+        .unwrap();
+        assert_eq!((t.max_visits, t.handoff_tokens), (5, 1000));
+    }
+
+    #[test]
+    fn rejects_bad_attributes() {
+        for src in [
+            "digraph t { a -> b [on=bogus] }",
+            "digraph t { a -> b [kind=bogus] }",
+            "digraph t { a [shape=parallelogram] }",
+            "digraph t { a [shape=star] }",
+            "digraph t { a [count=many] }",
+            "digraph t { graph [max_visits=x] a }",
+        ] {
+            assert!(team(src, 1).is_err(), "{src}");
+        }
+    }
 
     #[test]
     fn default_topology_routes_pairs() {
