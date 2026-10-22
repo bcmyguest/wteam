@@ -2,7 +2,7 @@
 //! here, never through a model. The orchestrator model only decomposes,
 //! dispatches and decides what to do about blocked tickets.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
@@ -10,6 +10,7 @@ use crate::paths::Paths;
 use crate::state::{EventKind, State, TicketStatus, Verdict, VerdictKind};
 use crate::team::{DEFAULT_CHECK_TIMEOUT_SECS, NodeKind, Team, TeamEvent, parse_instance};
 use crate::work::{self, Ticket};
+use crate::worktree;
 
 /// Everything a command needs to act on one effort.
 #[derive(Debug, Clone)]
@@ -147,37 +148,19 @@ fn mail_and_deliver(ctx: &Ctx, to: &str, from: &str, ticket: &str, body: &str) -
     crate::transport::for_name(&transport)?.deliver(ctx, to)
 }
 
-/// Run `git` in the repo root; stdout on success, stderr in the error otherwise.
-fn git(ctx: &Ctx, args: &[&str]) -> Result<String> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&ctx.paths.root)
-        .args(args)
-        .output()
-        .context("running git")?;
-    if !out.status.success() {
-        bail!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
 /// `git diff` of the ticket's files against HEAD, new files included.
-fn ticket_diff(ctx: &Ctx, t: &Ticket) -> Result<String> {
+fn ticket_diff(dir: &Path, t: &Ticket) -> Result<String> {
     let mut specs: Vec<&str> = vec!["--"];
     specs.extend(t.files.iter().map(String::as_str));
     let mut args = vec!["diff", "HEAD"];
     args.extend(&specs);
-    let mut diff = git(ctx, &args)?;
+    let mut diff = worktree::git(dir, &args)?;
     let mut args = vec!["ls-files", "--others", "--exclude-standard"];
     args.extend(&specs);
-    for f in git(ctx, &args)?.lines() {
+    for f in worktree::git(dir, &args)?.lines() {
         let out = std::process::Command::new("git")
             .arg("-C")
-            .arg(&ctx.paths.root)
+            .arg(dir)
             .args(["diff", "--no-index", "--", "/dev/null", f])
             .output()
             .context("running git diff --no-index")?;
@@ -195,15 +178,15 @@ fn ticket_diff(ctx: &Ctx, t: &Ticket) -> Result<String> {
 }
 
 /// Stage the ticket's files and commit only them. Returns the new sha.
-fn commit_ticket(ctx: &Ctx, t: &Ticket) -> Result<String> {
+fn commit_ticket(dir: &Path, t: &Ticket) -> Result<String> {
     let msg = format!("feat: {} (wteam {})", t.title, t.id);
     if t.files.is_empty() {
-        git(ctx, &["add", "-A"])?;
-        git(ctx, &["commit", "--allow-empty", "-m", &msg])?;
+        worktree::git(dir, &["add", "-A"])?;
+        worktree::git(dir, &["commit", "--allow-empty", "-m", &msg])?;
     } else {
         for f in &t.files {
             // A pattern that matches nothing (a file the worker never touched) is fine.
-            if let Err(e) = git(ctx, &["add", "-A", "--", f])
+            if let Err(e) = worktree::git(dir, &["add", "-A", "--", f])
                 && !format!("{e:#}").contains("did not match any")
             {
                 return Err(e);
@@ -211,19 +194,21 @@ fn commit_ticket(ctx: &Ctx, t: &Ticket) -> Result<String> {
         }
         let mut args = vec!["diff", "--cached", "--name-only", "--"];
         args.extend(t.files.iter().map(String::as_str));
-        let staged = git(ctx, &args)?;
+        let staged = worktree::git(dir, &args)?;
         let paths: Vec<&str> = staged.lines().collect();
         if paths.is_empty() {
-            git(ctx, &["diff", "--cached", "--quiet"])
+            worktree::git(dir, &["diff", "--cached", "--quiet"])
                 .context("nothing in the ticket's files changed, and other changes are staged")?;
-            git(ctx, &["commit", "--allow-empty", "-m", &msg])?;
+            worktree::git(dir, &["commit", "--allow-empty", "-m", &msg])?;
         } else {
             let mut args = vec!["commit", "-m", &msg, "--"];
             args.extend(&paths);
-            git(ctx, &args)?;
+            worktree::git(dir, &args)?;
         }
     }
-    Ok(git(ctx, &["rev-parse", "HEAD"])?.trim().to_string())
+    Ok(worktree::git(dir, &["rev-parse", "HEAD"])?
+        .trim()
+        .to_string())
 }
 
 /// Role `orchestrator` dispatches to (first `dispatch` route), else `worker`.
@@ -273,8 +258,8 @@ fn brief(
 fn contract_note(ctx: &Ctx) -> String {
     if ctx.paths.effort_dir().join("architecture.md").exists() {
         format!(
-            "\nShared contract: .wteam/{}/architecture.md. Follow its signatures and rules.\n",
-            ctx.paths.slug
+            "\nShared contract: {}. Follow its signatures and rules.\n",
+            ctx.paths.effort_dir().join("architecture.md").display()
         )
     } else {
         String::new()
@@ -432,15 +417,16 @@ fn kill_group(pid: u32) {
         .status();
 }
 
-/// Run `script` in the repo root with `WTEAM_TICKET` set, killing its process group after
+/// Run `script` in `dir` (the ticket's worktree, else the repo root) with `WTEAM_TICKET` set,
+/// killing its process group after
 /// `timeout_secs`. `None` on success, else the failure text with the output tail.
-fn run_check(ctx: &Ctx, script: &str, ticket: &str, timeout_secs: u64) -> Result<Option<String>> {
+fn run_check(dir: &Path, script: &str, ticket: &str, timeout_secs: u64) -> Result<Option<String>> {
     use std::io::Read;
     use std::os::unix::process::CommandExt;
     let mut child = std::process::Command::new("sh")
         .arg("-c")
         .arg(script)
-        .current_dir(&ctx.paths.root)
+        .current_dir(dir)
         .env("WTEAM_TICKET", ticket)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -508,9 +494,26 @@ fn gate_failed(
     fail_round(ctx, t, by, worker, verdict, expect)
 }
 
+/// Where a ticket's git work happens: its pair's worktree under worktree isolation, else the
+/// repo root.
+fn ticket_dir(ctx: &Ctx, ticket: &str) -> Result<PathBuf> {
+    let s = crate::state::load(&ctx.paths)?;
+    if s.run.isolation != "worktree" {
+        return Ok(ctx.paths.root.clone());
+    }
+    let pair = s
+        .tickets
+        .get(ticket)
+        .and_then(|ts| ts.pair)
+        .with_context(|| format!("ticket {ticket} has no pair"))?;
+    Ok(worktree::path(&ctx.paths, pair))
+}
+
 /// The review request mail: ticket, contract pointer, `context`, diff and verdict instructions.
 fn review_request(ctx: &Ctx, t: &Ticket, from: &str, context: &str) -> String {
-    let diff = ticket_diff(ctx, t).unwrap_or_else(|e| format!("(diff unavailable: {e:#})"));
+    let diff = ticket_dir(ctx, &t.id)
+        .and_then(|dir| ticket_diff(&dir, t))
+        .unwrap_or_else(|e| format!("(diff unavailable: {e:#})"));
     format!(
         "Review request: ticket {id} from {from}\n\n{body}\n{contract}\n{context}\nDiff of the ticket's files against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then run exactly one of:\n- `wteam verdict {id} pass`\n- `wteam verdict {id} fail --finding \"...\"` (repeat --finding per blocking problem)\n",
         id = t.id,
@@ -553,14 +556,30 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
                 );
             }
         }
+        let dirty = if s.run.isolation == "worktree" {
+            worktree::dirty_pairs(&ctx.paths, pairs)
+        } else {
+            Vec::new()
+        };
         let n = match pair {
             Some(n) if n < 1 || n > pairs => bail!("no pair {n} (team has {pairs})"),
             Some(n) if busy_pairs.contains(&n) => bail!("pair {n} is busy"),
             Some(n) => n,
-            None => (1..=pairs)
-                .find(|n| !busy_pairs.contains(n))
-                .context("every pair is busy")?,
+            None => match (1..=pairs).find(|n| !busy_pairs.contains(n) && !dirty.contains(n)) {
+                Some(n) => n,
+                None if dirty.is_empty() => bail!("every pair is busy"),
+                None => {
+                    let list: Vec<String> = dirty.iter().map(|n| format!("pair {n}")).collect();
+                    bail!(
+                        "every idle pair is busy or has uncommitted work (dirty: {})",
+                        list.join(", ")
+                    )
+                }
+            },
         };
+        if s.run.isolation == "worktree" {
+            worktree::prepare(&ctx.paths, n, &t.id)?;
+        }
         let agent = crate::team::instance_id(&role, n);
         let ts = s.ticket_mut(&t.id);
         ts.status = TicketStatus::Doing;
@@ -597,8 +616,9 @@ pub fn submit(ctx: &Ctx, agent: &str, ticket: &str, summary: &str) -> Result<()>
     crate::state::with_state(&ctx.paths, |s| {
         ensure_holder(s, &t.id, agent, TicketStatus::Doing)
     })?;
+    let dir = ticket_dir(ctx, &t.id)?;
     for cmd in &t.verify {
-        if let Some(out) = run_check(ctx, cmd, &t.id, DEFAULT_CHECK_TIMEOUT_SECS)? {
+        if let Some(out) = run_check(&dir, cmd, &t.id, DEFAULT_CHECK_TIMEOUT_SECS)? {
             return gate_failed(ctx, &t, "verify", agent, TicketStatus::Doing, agent, out);
         }
     }
@@ -639,7 +659,7 @@ pub fn submit(ctx: &Ctx, agent: &str, ticket: &str, summary: &str) -> Result<()>
                 return mail_and_deliver(ctx, &reviewer, agent, &t.id, &body);
             }
             Some(NodeKind::Command { script, timeout }) => {
-                if let Some(out) = run_check(ctx, script, &t.id, *timeout)? {
+                if let Some(out) = run_check(&dir, script, &t.id, *timeout)? {
                     return gate_failed(ctx, &t, &link.to, agent, TicketStatus::Doing, agent, out);
                 }
                 from = link.to.clone();
@@ -670,7 +690,7 @@ fn advance_passed(
                 Some(NodeKind::Command { script, timeout }) => (script.clone(), *timeout),
                 _ => bail!("`{node}` is not a command node"),
             };
-            if let Some(out) = run_check(ctx, &script, &t.id, timeout)? {
+            if let Some(out) = run_check(&ticket_dir(ctx, &t.id)?, &script, &t.id, timeout)? {
                 let pair = crate::state::load(&ctx.paths)?
                     .tickets
                     .get(&t.id)
@@ -726,6 +746,22 @@ fn advance_passed(
     }
 }
 
+/// Commit the ticket, then under worktree isolation merge it onto main. Returns the landed sha.
+fn land(ctx: &Ctx, t: &Ticket) -> Result<String> {
+    let st = crate::state::load(&ctx.paths)?;
+    let dir = ticket_dir(ctx, &t.id)?;
+    let sha = commit_ticket(&dir, t)?;
+    if st.run.isolation != "worktree" {
+        return Ok(sha);
+    }
+    let pair = st
+        .tickets
+        .get(&t.id)
+        .and_then(|ts| ts.pair)
+        .context("worktree ticket has no pair")?;
+    worktree::merge_back(&ctx.paths, pair, &t.id)
+}
+
 /// Commit a passed ticket once every reviewer on its pass chain has passed this round.
 fn finish_pass(ctx: &Ctx, t: &Ticket, by: &str, notes: &[String]) -> Result<()> {
     let first = first_reviewer(ctx, &dispatch_role(ctx))?;
@@ -745,7 +781,10 @@ fn finish_pass(ctx: &Ctx, t: &Ticket, by: &str, notes: &[String]) -> Result<()> 
             pending.join(", ")
         );
     }
-    let sha = commit_ticket(ctx, t)?;
+    let sha = match land(ctx, t) {
+        Ok(sha) => sha,
+        Err(e) => return block(ctx, by, &t.id, &format!("{e:#}")),
+    };
     let pair = crate::state::with_state(&ctx.paths, |s| {
         let ts = s.ticket_mut(&t.id);
         ts.status = TicketStatus::Done;

@@ -183,8 +183,9 @@ pub struct RunArgs {
     pub team: String,
     #[arg(long, default_value_t = 1)]
     pub pairs: u32,
-    #[arg(long, default_value = "none")]
-    pub isolation: String,
+    /// `none` or `worktree` (default: `worktree` when pairs > 1, else `none`).
+    #[arg(long)]
+    pub isolation: Option<String>,
     /// Transport (default: from ~/.config/wteam/config.toml, else `resume`).
     #[arg(long)]
     pub transport: Option<String>,

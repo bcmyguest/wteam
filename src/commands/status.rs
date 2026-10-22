@@ -27,6 +27,7 @@ pub fn status(g: &Global) -> Result<Out> {
     crate::engine::Ctx::load(p.clone())?;
     let tickets = work::load_tickets(&p.tickets_dir())?;
     let st = state::load(&p)?;
+    let dirty = crate::worktree::dirty_pairs(&p, st.run.pairs);
 
     let mut text = String::new();
     let mut rows = Vec::new();
@@ -51,6 +52,14 @@ pub fn status(g: &Global) -> Result<Out> {
     }
     if tickets.is_empty() {
         text.push_str("no tickets\n");
+    }
+
+    if !dirty.is_empty() {
+        let list: Vec<String> = dirty.iter().map(|n| format!("pair {n}")).collect();
+        text.push_str(&format!(
+            "dirty worktrees (uncommitted work): {}\n",
+            list.join(", ")
+        ));
     }
 
     let mut agents = Vec::new();
@@ -93,7 +102,13 @@ pub fn status(g: &Global) -> Result<Out> {
 
     Ok(Out::new(
         text.trim_end().to_string(),
-        json!({ "tickets": rows, "agents": agents, "tokens_total": tokens_total, "events": events }),
+        json!({
+            "tickets": rows,
+            "agents": agents,
+            "tokens_total": tokens_total,
+            "events": events,
+            "dirty_worktrees": dirty,
+        }),
     ))
 }
 
@@ -102,6 +117,8 @@ pub fn ready(g: &Global) -> Result<Out> {
     let tickets = work::load_tickets(&p.tickets_dir())?;
     let st = state::load(&p)?;
     let ready = work::ready(&tickets, &st);
+    let dirty = crate::worktree::dirty_pairs(&p, st.run.pairs);
+    let dispatchable = work::dispatchable(&tickets, &st, &dirty);
 
     let text = if ready.is_empty() {
         "nothing ready".to_string()
@@ -114,7 +131,14 @@ pub fn ready(g: &Global) -> Result<Out> {
     };
     let json = ready
         .iter()
-        .map(|t| json!({ "id": t.id, "title": t.title, "files": t.files }))
+        .map(|t| {
+            json!({
+                "id": t.id,
+                "title": t.title,
+                "files": t.files,
+                "dispatchable": dispatchable.contains(&t.id),
+            })
+        })
         .collect::<Vec<_>>();
     Ok(Out::new(text, json!(json)))
 }

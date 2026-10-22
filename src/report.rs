@@ -81,6 +81,7 @@ pub fn report_data(paths: &Paths) -> Result<Value> {
             _ => {}
         }
     }
+    let dirty = crate::worktree::dirty_pairs(paths, state.run.pairs);
     let (mut promote, mut watching) = (Vec::new(), Vec::new());
     for (key, count) in follow_up_counts(paths)? {
         let row = json!({ "key": key, "count": count });
@@ -108,6 +109,7 @@ pub fn report_data(paths: &Paths) -> Result<Value> {
         "done": done,
         "blocked": blocked,
         "follow_ups": { "promote": promote, "watching": watching },
+        "dirty_worktrees": dirty,
         "next_step": next_step,
     }))
 }
@@ -141,6 +143,16 @@ pub fn stop_report(paths: &Paths) -> Result<String> {
             s(b, "reason"),
             s(b, "action")
         ));
+    }
+    let dirty: Vec<String> = rows(&data["dirty_worktrees"])
+        .iter()
+        .filter_map(Value::as_u64)
+        .map(|n| format!("pair {n}"))
+        .collect();
+    if dirty.is_empty() {
+        out.push_str("Dirty worktrees: none\n");
+    } else {
+        out.push_str(&format!("Dirty worktrees: {}\n", dirty.join(", ")));
     }
     out.push_str("\n## Follow-ups\n");
     let (promote, watching) = (

@@ -1,0 +1,292 @@
+//! Parallel pairs and worktree isolation: disjoint tickets run concurrently, overlapping
+//! tickets are refused, worktree merges land on main in order, and conflicts block.
+
+mod support;
+
+use predicates::str::contains;
+use support::Repo;
+
+/// Worker that waits for `go`, then edits its ticket's file and submits.
+const WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+i=0
+while [ ! -f "$WTEAM_FAKE_DIR/go" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+mkdir -p src
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id"
+"#;
+
+/// Reviewer that passes the review request it was sent.
+const REVIEWER_PASS: &str = r#"
+for id in $(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/^Review request: ticket \([0-9][0-9]\).*/\1/p'); do
+  wteam verdict "$id" pass
+done
+"#;
+
+/// Worker that parks on `go`, submits, and records each brief it was sent.
+const RECORDING_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+printf '%s\n' "$WTEAM_PROMPT" >> "$WTEAM_FAKE_DIR/worker-prompts"
+mkdir -p src
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id"
+"#;
+
+/// Worker that leaves ticket 01 blocked with uncommitted work in its worktree.
+const STUCK_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+mkdir -p src
+if [ "$id" = "01" ]; then
+  echo wip > src/wip.txt
+  wteam block "$id" --reason "stuck"
+  exit 0
+fi
+i=0
+while [ ! -f "$WTEAM_FAKE_DIR/go" ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id"
+"#;
+
+/// Worker that stages an unrelated file and submits, so the ticket's commit has nothing to stage.
+const STAGES_ELSEWHERE_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+echo other > other.txt
+git add other.txt
+wteam submit "$id" --summary "staged elsewhere"
+"#;
+
+/// Worktree isolation with `pairs` pairs and the default team; the orchestrator never dispatches.
+fn repo_with_pairs(pairs: u32) -> Repo {
+    let r = Repo::new("demo");
+    r.use_fake_agents();
+    r.agent_script("orchestrator", "echo ok\n");
+    r.agent_script("planner", "echo ok\n");
+    r.write(
+        ".wteam/demo/state.json",
+        &format!(
+            r#"{{"slug":"demo","run":{{"pairs":{pairs},"isolation":"worktree",
+                "transport":"resume","team":"default"}}}}"#
+        ),
+    );
+    r.agent_script("worker", WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r
+}
+
+fn repo() -> Repo {
+    repo_with_pairs(2)
+}
+
+/// Release the workers parked on the `go` file.
+fn go(r: &Repo) {
+    r.write(".wteam-fake/go", "");
+}
+
+#[test]
+fn disjoint_tickets_run_concurrently_and_both_commit() {
+    let r = repo();
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wteam().args(["dispatch", "02"]).assert().success();
+
+    // Both workers are parked on `go`, so both being in progress proves they run at once.
+    let s = r.wait_for(60, |s| {
+        s["tickets"]["01"]["status"] == "doing" && s["tickets"]["02"]["status"] == "doing"
+    });
+    assert_eq!(s["tickets"]["01"]["pair"], 1);
+    assert_eq!(s["tickets"]["02"]["pair"], 2);
+    assert!(r.path().join(".wteam/demo/worktrees/pair1").is_dir());
+    assert!(r.path().join(".wteam/demo/worktrees/pair2").is_dir());
+    go(&r);
+
+    r.wait_for(60, |s| {
+        s["tickets"]["01"]["status"] == "done" && s["tickets"]["02"]["status"] == "done"
+    });
+    let log = r.git(&["log", "--format=%s"]);
+    assert!(log.contains("feat: Add one (wteam 01)"), "{log}");
+    assert!(log.contains("feat: Add two (wteam 02)"), "{log}");
+    assert!(r.read("src/01.txt").contains("edit"));
+    assert!(r.read("src/02.txt").contains("edit"));
+}
+
+#[test]
+fn overlapping_ticket_is_refused_until_the_first_passes() {
+    let r = repo();
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.ticket("03", "Add three", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+
+    r.wteam()
+        .args(["dispatch", "03"])
+        .assert()
+        .failure()
+        .stderr(contains("overlaps files with 01"));
+
+    let out = r.wteam().args(["ready", "--json"]).output().unwrap();
+    let ready: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let flag = |id: &str| {
+        ready
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == id)
+            .map(|t| t["dispatchable"].clone())
+    };
+    assert_eq!(flag("02"), Some(true.into()));
+    assert_eq!(flag("03"), Some(false.into()));
+
+    go(&r);
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    r.wteam().args(["dispatch", "03"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["03"]["status"] == "done");
+}
+
+#[test]
+fn worktree_merges_land_in_order_and_worktrees_are_removed() {
+    let r = repo();
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "01", "src/02.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "doing");
+    assert!(r.path().join(".wteam/demo/worktrees/pair1").is_dir());
+    go(&r);
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+    r.wteam().args(["dispatch", "02"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["02"]["status"] == "done");
+
+    let log = r.git(&["log", "--format=%s"]);
+    let lines: Vec<&str> = log.lines().collect();
+    assert!(lines[0].contains("(wteam 02)"), "{log}");
+    assert!(lines[1].contains("(wteam 01)"), "{log}");
+    assert!(r.git(&["log", "--merges", "--format=%H"]).is_empty());
+    assert!(!r.path().join(".wteam/demo/worktrees/pair1").exists());
+    assert!(!r.path().join(".wteam/demo/worktrees/pair2").exists());
+    assert_eq!(r.git(&["worktree", "list"]).lines().count(), 1);
+    assert!(r.git(&["branch", "--list", "wteam/*"]).trim().is_empty());
+}
+
+#[test]
+fn conflicting_worktree_merge_blocks_ticket_and_leaves_main_alone() {
+    let r = repo();
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "doing");
+
+    // Main gains the same file while the worker's branch is still on the old base.
+    r.write("src/01.txt", "main\n");
+    r.git(&["add", "src/01.txt"]);
+    r.git(&["commit", "-q", "-m", "chore: main edit"]);
+    let main_head = r.git(&["rev-parse", "HEAD"]);
+    go(&r);
+
+    let s = r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+    let reason = s["tickets"]["01"]["blocked_reason"].as_str().unwrap();
+    assert!(reason.contains("src/01.txt"), "{reason}");
+    assert_eq!(r.git(&["rev-parse", "HEAD"]), main_head);
+    assert!(!r.git(&["log", "--format=%s"]).contains("(wteam 01)"));
+}
+
+#[test]
+fn dirty_pair_is_skipped_by_auto_pick_and_reported() {
+    let r = repo();
+    r.agent_script("worker", STUCK_WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+    go(&r);
+
+    r.wteam().args(["dispatch", "02"]).assert().success();
+    let s = r.wait_for(60, |s| s["tickets"]["02"]["status"] == "done");
+    assert_eq!(s["tickets"]["02"]["pair"], 2);
+
+    r.wteam()
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(contains("dirty worktrees (uncommitted work): pair 1"));
+    let out = r.wteam().args(["status", "--json"]).output().unwrap();
+    let status: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(status["dirty_worktrees"], serde_json::json!([1]));
+    r.wteam()
+        .arg("stop")
+        .assert()
+        .success()
+        .stdout(contains("Dirty worktrees: pair 1"));
+}
+
+#[test]
+fn auto_dispatch_refuses_when_every_idle_pair_is_dirty() {
+    let r = repo_with_pairs(1);
+    r.agent_script("worker", STUCK_WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.ticket("02", "Add two", "None", "src/02.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+
+    r.wteam()
+        .args(["dispatch", "02"])
+        .assert()
+        .failure()
+        .stderr(contains("dirty: pair 1"));
+}
+
+#[test]
+fn commit_failure_blocks_the_ticket_instead_of_stranding_it_in_review() {
+    let r = repo();
+    r.agent_script("worker", STAGES_ELSEWHERE_WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    let main_head = r.git(&["rev-parse", "HEAD"]);
+    r.wteam().args(["dispatch", "01"]).assert().success();
+
+    let s = r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+    let reason = s["tickets"]["01"]["blocked_reason"].as_str().unwrap();
+    assert!(
+        reason.contains("nothing in the ticket's files changed"),
+        "{reason}"
+    );
+    assert_eq!(r.git(&["rev-parse", "HEAD"]), main_head);
+}
+
+#[test]
+fn unrelated_dirty_file_in_main_survives_merge_back() {
+    let r = repo();
+    r.agent_script("worker", WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "doing");
+
+    r.write("README.md", "scratch\n");
+    go(&r);
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+
+    assert_eq!(r.read("README.md"), "scratch\n");
+    assert!(r.git(&["status", "--porcelain"]).contains("README.md"));
+    assert!(r.read("src/01.txt").contains("edit"));
+}
+
+#[test]
+fn worktree_brief_points_at_the_contract_by_absolute_path() {
+    let r = repo();
+    r.write(".wteam/demo/architecture.md", "# contract\n");
+    r.agent_script("worker", RECORDING_WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+
+    let contract = r.path().join(".wteam/demo/architecture.md");
+    let brief = r.read(".wteam-fake/worker-prompts");
+    assert!(
+        brief.contains(&contract.display().to_string()),
+        "brief does not name {}: {brief}",
+        contract.display()
+    );
+    assert!(contract.is_file());
+}

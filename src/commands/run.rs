@@ -11,9 +11,12 @@ use crate::watcher::{self, RunOptions};
 
 pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
     let paths = super::effort(g)?;
-    match a.isolation.as_str() {
-        "none" => {}
-        "worktree" => bail!("--isolation worktree is not available yet (ticket 14)"),
+    let isolation = a
+        .isolation
+        .clone()
+        .unwrap_or_else(|| if a.pairs > 1 { "worktree" } else { "none" }.to_string());
+    match isolation.as_str() {
+        "none" | "worktree" => {}
         other => bail!("unknown isolation `{other}` (expected none or worktree)"),
     }
     let transport = a.transport.clone().unwrap_or_else(|| "resume".to_string());
@@ -30,7 +33,7 @@ pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
     state::with_state(&paths, |s| {
         s.run = RunSettings {
             pairs: a.pairs,
-            isolation: a.isolation.clone(),
+            isolation: isolation.clone(),
             transport: transport.clone(),
             team: a.team.clone(),
             budget_tokens: a.budget_tokens,

@@ -318,6 +318,34 @@ pub fn ready<'a>(tickets: &'a [Ticket], state: &State) -> Vec<&'a Ticket> {
     out
 }
 
+/// Ids of the ready tickets `dispatch` would accept now: a pair is free (neither busy nor
+/// dirty), and the ticket's `files` overlap no ticket in progress.
+pub fn dispatchable(tickets: &[Ticket], state: &State, dirty: &[u32]) -> Vec<String> {
+    let busy_pairs: Vec<u32> = state
+        .tickets
+        .values()
+        .filter(|ts| matches!(ts.status, TicketStatus::Doing | TicketStatus::Review))
+        .filter_map(|ts| ts.pair)
+        .collect();
+    let free_pair = (1..=state.run.pairs).any(|n| !busy_pairs.contains(&n) && !dirty.contains(&n));
+    let in_progress: Vec<&Ticket> = tickets
+        .iter()
+        .filter(|t| {
+            state.tickets.get(&t.id).is_some_and(|ts| {
+                matches!(
+                    ts.status,
+                    TicketStatus::Doing | TicketStatus::Review | TicketStatus::AwaitingApproval
+                )
+            })
+        })
+        .collect();
+    ready(tickets, state)
+        .into_iter()
+        .filter(|t| free_pair && in_progress.iter().all(|other| !files_overlap(t, other)))
+        .map(|t| t.id.clone())
+        .collect()
+}
+
 /// The literal directory prefix of a glob, up to its first wildcard.
 fn static_prefix(pattern: &str) -> &str {
     let cut = pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len());

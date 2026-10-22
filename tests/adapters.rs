@@ -191,6 +191,23 @@ fn codex_first_turn_command() {
     assert_eq!(c.stdin, Some(String::new()));
 }
 
+/// Worker turns in a worktree still make the main repo's `.wteam` writable, via `WTEAM_ROOT`.
+#[test]
+fn codex_writable_root_is_main_repo_not_cwd() {
+    let req = TurnRequest {
+        cwd: PathBuf::from("/work/.wteam/demo/worktrees/pair1"),
+        env: vec![pair("WTEAM_ROOT", "/work"), pair("WTEAM_AGENT", "worker.1")],
+        ..first()
+    };
+    let c = Codex.command(&req);
+    assert!(
+        c.args
+            .contains(&r#"sandbox_workspace_write.writable_roots=["/work/.wteam"]"#.to_string()),
+        "{:?}",
+        c.args
+    );
+}
+
 /// `codex exec resume` rejects `--add-dir` (codex-cli 0.156.1), so the `.wteam` dir goes via `-c`.
 #[test]
 fn codex_resume_command() {

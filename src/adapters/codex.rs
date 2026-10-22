@@ -97,10 +97,16 @@ impl Adapter for Codex {
 }
 
 /// Make `<root>/.wteam` writable so `wteam` calls inside codex's sandbox can update state.
+/// `<root>` is the main repo (`WTEAM_ROOT`), not the cwd: worker turns may run in a worktree.
 /// `--add-dir` exists on `codex exec` but `codex exec resume` rejects it (codex-cli 0.156.1),
 /// so both turns use the `-c` config override for `sandbox_workspace_write.writable_roots`.
 fn wteam_dir_args(req: &TurnRequest) -> Vec<String> {
-    let dir = req.cwd.join(".wteam").display().to_string();
+    let root = req
+        .env
+        .iter()
+        .find(|(k, _)| k == "WTEAM_ROOT")
+        .map_or_else(|| req.cwd.clone(), |(_, v)| PathBuf::from(v));
+    let dir = root.join(".wteam").display().to_string();
     let roots = serde_json::Value::String(dir).to_string();
     vec![
         "-c".into(),

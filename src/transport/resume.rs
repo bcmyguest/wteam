@@ -317,6 +317,30 @@ fn apply_files(paths: &crate::paths::Paths, t: &crate::permissions::Translation)
     Ok(())
 }
 
+/// Working directory for `agent`'s turn: the worktree of the pair holding one of its tickets
+/// under worktree isolation, else the repo root.
+fn turn_dir(ctx: &Ctx, agent: &str) -> Result<PathBuf> {
+    let s = crate::state::load(&ctx.paths)?;
+    if s.run.isolation == "worktree" {
+        let held = s.tickets.values().find(|ts| {
+            ts.assignee.as_deref() == Some(agent)
+                && matches!(
+                    ts.status,
+                    crate::state::TicketStatus::Doing
+                        | crate::state::TicketStatus::Review
+                        | crate::state::TicketStatus::AwaitingApproval
+                )
+        });
+        if let Some(pair) = held.and_then(|ts| ts.pair) {
+            let dir = crate::worktree::path(&ctx.paths, pair);
+            if dir.is_dir() {
+                return Ok(dir);
+            }
+        }
+    }
+    Ok(ctx.paths.root.clone())
+}
+
 /// Run one adapter turn for `agent`, write its log and record the outcome.
 /// Returns the reply text. `foreground` turns (the watcher's orchestrator turns) run the
 /// adapter in its own process group and record its pid as the agent's `turn_pid`, so
@@ -365,7 +389,7 @@ pub fn one_turn(
         session_id: session.clone(),
         prompt: prompt.to_string(),
         role_prompt,
-        cwd: ctx.paths.root.clone(),
+        cwd: turn_dir(ctx, agent)?,
         env: vec![
             ("WTEAM_ROOT".into(), ctx.paths.root.display().to_string()),
             ("WTEAM_SLUG".into(), ctx.paths.slug.clone()),

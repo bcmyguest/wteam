@@ -182,10 +182,10 @@ fn max_turns_stops_with_reason() {
 fn unlanded_isolation_and_transport_error() {
     let r = chain();
     r.wteam()
-        .args(["run", "--isolation", "worktree"])
+        .args(["run", "--isolation", "bogus"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("not available yet (ticket 14)"));
+        .stderr(predicates::str::contains("unknown isolation `bogus`"));
     r.wteam()
         .args(["run", "--transport", "herdr"])
         .assert()
