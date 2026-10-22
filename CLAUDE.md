@@ -13,9 +13,10 @@ wteam: Portable worker/reviewer teams for coding agents (Claude Code, Codex, ope
 - `engine.rs` runs the ticket lifecycle (dispatch, submit, verdict, block). Mutate `state.json` only through `state::with_state`.
 - `mailbox.rs` is the append-only mail format: a marker line, headers, a blank line, then exactly `length` bytes. Parsers slice by length and never scan bodies.
 - `paths.rs` owns every path under `.wteam/`.
-- `adapters/` builds per-CLI commands (`claude`, `codex`, `opencode`, `fake`). `cursor` is not implemented yet.
+- `adapters/` builds per-CLI commands (`claude`, `codex`, `opencode`, `pi`, `fake`). `cursor` is not implemented yet.
 - `permissions/` translates profiles per CLI. `team/` parses team DOT graphs.
-- `backup.rs` is implemented (used by `stop` and `resume`). `worktree.rs`, `watcher.rs` and the `run` command are stubs: `bail!("not implemented…")`.
+- `watcher.rs` is the `wteam run` loop (handoff, budget, stop reasons). `transport/resume.rs` holds self-healing: silent-turn re-prompt, retries.
+- `backup.rs` is implemented (used by `transport/resume.rs` writes, `stop` and `restore`). `worktree.rs` is a stub (`--isolation worktree`, ticket 14), as is `transport/herdr.rs`; `config` and `setup` (ticket 13) too: `bail!("not implemented…")`.
 
 `architecture.md` at the repo root is the shared contract; the docs site renders the
 module map and sequence diagrams from it (`site/src/content/docs/architecture.md`).
@@ -38,9 +39,14 @@ cargo build --release
 cd site && pnpm install && pnpm build       # docs site (Astro + Starlight)
 ```
 
+wteam ticket commands (orchestrator, `src/commands/tickets.rs`):
+`dispatch NN [--pair N]`, `requeue NN [--note TEXT]` (blocked tickets only: back to todo,
+review rounds reset, note goes into the next dispatch brief), `approve NN` (human gate).
+
 `tests/docs.rs` checks that every `--flag` in README.md appears in some `wteam <cmd> --help`
 output (or is on its allowlist of other tools' flags). Add new README flags only after they
-exist in the CLI.
+exist in the CLI. Flags of other tools in README (for example `claude --setting-sources`)
+fail the test; describe them in prose or add them to `OTHER_TOOLS`.
 
 Pre-commit enforces Conventional Commits (`feat:`, `fix:`, `docs:`, …) via a
 commit-msg hook; install with

@@ -71,9 +71,17 @@ wteam verdict 01 fail --finding "Parser ignores CRLF"
 ```
 
 Agents read their mail with `wteam inbox` and message each other with
-`wteam send <agent> "<text>"`.
+`wteam send <agent> "<text>"`. A blocked ticket returns to todo with `wteam requeue 01 --note "<guidance>"`.
 
-:::caution[Status: in progress]
-`wteam run` (the watcher that drives the whole team), `wteam approve` and the
-human gates are not implemented yet. Drive tickets by hand as above until they land.
-:::
+## Run the team
+
+To drive every ready ticket through the team until nothing is runnable:
+
+```bash
+wteam run --pairs 2
+```
+
+`run` starts the orchestrator and feeds it events until the run stops, then prints a
+stop report. Use `--budget-tokens` and `--max-turns` to cap a run. Human gates pass
+with `wteam approve <ticket>`. See [Concepts](../concepts/#self-healing) for how
+turns recover from failures.

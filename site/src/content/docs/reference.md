@@ -19,30 +19,44 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `verdict <ticket> pass\|fail` | Record a verdict (`--finding`, `--note`, `--follow-up`) |
 | `block <ticket>` | Mark a ticket blocked (`--reason <text>`) |
 | `requeue <ticket>` | Return a blocked ticket to todo (`--note <text>`) |
-| `approve <ticket>` | Pass a human gate. In progress. |
+| `approve <ticket>` | Pass a human gate; the ticket resumes from the gate's pass route |
 | `send <to> <message>` | Message another agent |
 | `inbox` | Read mail (`--all` for the whole mailbox) |
 | `wait` | Block until orchestrator events arrive (`--timeout <secs>`) |
-| `run` | Drive the team. In progress. |
+| `run` | Drive the orchestrator until nothing is runnable (see below) |
 | `stop` / `restore` | Stop a run, restore backed-up files |
 | `report` | Print the stop report |
+| `role <name>` | Print a resolved role prompt (project, config dir, then built-in) |
 | `graph` | Team or work graph as Mermaid (`--work`, `--team <name>`) |
 | `permissions` | Profile translation matrix (`--profile`, `--cli`) |
 | `config promote\|list\|show` | Saved teams under `~/.config/wteam`. In progress. |
 | `setup` | Detect herdr and pick a transport. In progress. |
+
+## `run` options
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--pairs <n>` | 1 | Worker and reviewer pairs (`$pairs` in the team graph) |
+| `--team <name\|path>` | `default` | Preset, promoted team, or `.dot` file |
+| `--transport <name>` | from config, else `resume` | How a mail starts a turn |
+| `--timeout <secs>` | 7200 | Seconds to wait for agent turns before stopping |
+| `--max-turns <n>` | 200 | Orchestrator turns, handoff turns included |
+| `--budget-tokens <n>` | none | Stop new work once summed agent context tokens exceed `n` |
+| `--isolation <none\|worktree>` | `none` | `worktree` is not available yet |
 
 ## Team graph attributes
 
 | Attribute | Where | Meaning |
 |---|---|---|
 | `max_visits` | graph | Review rounds before a ticket is blocked. Default 3. |
-| `handoff_tokens` | graph | Context size that triggers an orchestrator handoff. |
+| `handoff_tokens` | graph | Context size that triggers an orchestrator handoff. The effective threshold is `min(handoff_tokens, 0.75 × context_window)`. |
 | `agent` | node | Agent definition name |
 | `count` | node | Instances; `$pairs` takes the `--pairs` value. Default 1. |
 | `profile` | node | Overrides the agent's permission profile |
 | `prompt` | node | Overrides the agent's role prompt |
 | `shape` | node | `box` agent, `parallelogram` command, `hexagon` human gate |
 | `script` | command node | Script run from the repo root |
+| `timeout` | command node | Seconds before the script counts as failed. Default 600. |
 | `on` | edge | Event: `dispatch`, `submit`, `pass`, `fail`, `blocked`, `message` |
 | `kind` | edge | `pair`, `broadcast` or `fan-in`. Default `pair`. |
 
@@ -53,10 +67,11 @@ Optional. Resolved from `.wteam/agents/<name>.toml`, then
 
 ```toml
 name = "worker"
-cli = "claude"       # claude | codex | opencode | fake (cursor: in progress)
+cli = "claude"       # claude | codex | opencode | pi | fake (cursor: in progress)
 model = "sonnet"
 prompt = "worker"
 profile = "edit"
+context_window = 200000  # optional; caps the orchestrator handoff at 0.75 of it
 extra_args = []      # passed through to the CLI
 ```
 

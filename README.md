@@ -64,13 +64,49 @@ Every command accepts `--json`. The full walkthrough is in the
 | `pickup` | Import planning output and verify it |
 | `status`, `ready` | Show tickets and agents; list ready tickets |
 | `dispatch`, `submit`, `verdict`, `block`, `requeue` | Move tickets through review |
+| `approve` | Pass a human gate |
+| `run` | Drive the orchestrator until nothing is runnable |
 | `send`, `inbox`, `wait` | Mail and event waiting |
 | `graph` | Team or work graph as Mermaid (`--work`, `--team`) |
 | `permissions` | Permission profile translation per CLI |
 | `report`, `stop`, `restore` | Stop reports and restoring backed-up files |
-| `run`, `approve`, `config`, `setup` | In progress; see the docs site |
+| `role` | Print a resolved role prompt |
+| `config`, `setup` | In progress; see the docs site |
 
 `wteam <command> --help` lists every flag.
+
+## Running a team
+
+`wteam run` drives the orchestrator turn by turn. It feeds the orchestrator
+digests of worker and reviewer events until nothing is runnable, then prints a
+stop report:
+
+```bash
+wteam run --pairs 2 --budget-tokens 2000000 --max-turns 200
+```
+
+- `--budget-tokens` stops new work once the agents' summed context tokens exceed
+  the budget. In-flight turns finish first.
+- `--max-turns` caps orchestrator turns. Handoff turns count toward it.
+- The orchestrator hands off to a new generation when its context passes
+  `min(handoff_tokens, 0.75 × context_window)`. The handoff is written to
+  `handoffs/orchestrator-<gen>.md`.
+- Stop reasons: no ticket runnable or in progress, ready tickets not dispatched,
+  `--max-turns` reached, token budget exceeded, `--timeout` reached, or a failed
+  orchestrator turn.
+
+Agents self-heal. A turn that ends with a held ticket and no `submit` or `block`
+gets one re-prompt, then the ticket is blocked. Transient adapter failures retry
+three times with backoff. A turn whose process died is reset on the next command.
+
+## Gates
+
+`Verify:` commands in a ticket, and command nodes (`shape=parallelogram`,
+`script=`), run at `submit`. A non-zero exit, or a timeout (600 s by default,
+`timeout=` per node), returns the ticket to the worker with the output tail as the finding.
+A human gate (`shape=hexagon`) holds a passed ticket until `wteam approve <ticket>`.
+A pass path that reaches a reviewer who already passed the round blocks the ticket
+as a pass cycle.
 
 ## team.dot
 
@@ -97,16 +133,24 @@ the [reference](https://bcmyguest.github.io/wteam/reference/#team-graph-attribut
 ## Agents
 
 Each role is an agent definition, a TOML file with `name`, `cli`, and optional
-`model`, `prompt`, `profile` and `extra_args`. Built-ins cover `planner`,
-`orchestrator`, `worker` and `reviewer`. Override one with
+`model`, `prompt`, `profile`, `context_window` and `extra_args`. Built-ins cover
+`planner`, `orchestrator`, `worker` and `reviewer`. Override one with
 `.wteam/agents/<name>.toml` or `$WTEAM_CONFIG_DIR/agents/<name>.toml`.
-`cli` is `claude`, `codex`, `opencode` or `fake` (used by tests); `cursor` is in progress.
+`cli` is `claude`, `codex`, `opencode`, `pi` or `fake` (used by tests); `cursor` is in progress.
+
+Claude agents run with project and local settings only, so user hooks and rules
+do not reach them. Set
+`WTEAM_CLAUDE_USER_SETTINGS=1` to keep user settings. Role prompts require one
+command per shell call.
 
 ## Permissions
 
 Profiles are Claude permission rules: `control`, `review`, `edit` and `full`.
 wteam translates each one per CLI. Some translations are lossy, for example
-Codex cannot deny reads of specific paths. The matrix and reasons are in the
+Codex cannot deny reads of specific paths. Codex agents may write `.wteam/`, so
+`wteam` calls inside its sandbox can update state. The `pi` adapter enforces
+nothing (✘ in every row): pi runs tools unrestricted, so use a sandbox. The matrix
+and reasons are in the
 [permissions guide](https://bcmyguest.github.io/wteam/permissions/).
 
 ## Layout

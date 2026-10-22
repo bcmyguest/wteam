@@ -16,12 +16,13 @@ The library lives in `src/lib.rs`. `src/main.rs` only parses arguments and print
 | `mailbox.rs` | Append-only mail format and parser |
 | `state.rs` | `state.json`; written only through `state::with_state` |
 | `paths.rs` | Every on-disk path under `.wteam/` |
-| `adapters/` | Per-CLI command builders (Claude Code, Codex, opencode, fake) |
+| `adapters/` | Per-CLI command builders (Claude Code, Codex, opencode, pi, fake) |
 | `permissions/` | Profile translation per CLI |
 | `team/` | DOT team-graph parser |
-| `transport/` | How a delivered mail starts a turn |
+| `transport/` | How a delivered mail starts a turn; self-healing and retries in `resume.rs` |
+| `watcher.rs` | The `run` loop: orchestrator turns, handoff, budget, stop reasons |
 | `backup.rs` | Restore points for files a run applies |
-| `worktree.rs`, `watcher.rs` | Isolated worktrees and the `run` watcher (in progress) |
+| `worktree.rs` | Isolated worktrees (in progress) |
 
 ## Turn lifecycle
 

@@ -37,9 +37,13 @@ Node shapes: `box` is an agent role, `parallelogram` is a command (`script=`),
 and `hexagon` is a human gate. Edge `kind` defaults to `pair`. `count` defaults to 1.
 `max_visits` caps review rounds: after that many failures, the ticket becomes `Blocked`.
 
-:::caution[Status: in progress]
-`submit` rejects a round whose next hop is a command or human gate. The parser accepts those nodes.
-:::
+### Gates
+
+A ticket's `Verify:` commands run first at `submit`, then the command nodes on the
+worker's path. A failing command (non-zero exit or timeout) returns the ticket to
+the worker with the output tail as the finding. A human gate holds a passed ticket
+until `wteam approve <ticket>`. A human gate cannot directly follow `submit`. A pass
+path that reaches a reviewer who already passed the round blocks the ticket.
 
 ## Work graph
 
@@ -53,7 +57,9 @@ the tickets with every blocker `Done`. `wteam graph --work` draws it.
    summary and the diff of the ticket's files.
 3. `verdict pass` commits the ticket's files as `feat: <title> (wteam NN)` and
    sets it to `Done`. `verdict fail` returns it to `Doing` with the findings.
-4. `block` marks the ticket `Blocked` and tells the orchestrator.
+4. `block` marks the ticket `Blocked` and tells the orchestrator. `requeue` returns a
+   blocked ticket to `Todo` with a note for the next dispatch brief; the review round
+   count resets. Only blocked tickets can be requeued.
 
 Full sequence: [Architecture](../architecture/#ticket-lifecycle).
 
@@ -67,12 +73,29 @@ and `--all` shows the whole mailbox.
 
 ## Handoff
 
-When an agent's context grows past `handoff_tokens`, the orchestrator writes
-`handoffs/orchestrator-<gen>.md` and starts a new generation with that file as its brief.
+When the orchestrator's context passes `min(handoff_tokens, 0.75 × context_window)`,
+`wteam run` asks it for a baton. The baton is written to `handoffs/orchestrator-<gen>.md`,
+and the next generation starts with that file as its brief.
 
-:::caution[Status: in progress]
-Handoff generation is part of the orchestrator loop that `wteam run` drives. Not yet wired.
-:::
+## Self-healing
+
+A turn that ends while its agent still holds a ticket, with no `submit` or `block`,
+gets one re-prompt. A second silent turn blocks the ticket and tells the orchestrator.
+Transient adapter failures retry three times with backoff. A busy agent whose turn
+process has died is reset on the next command.
+
+## Live results
+
+One small smoke test, not a benchmark. The work is a small Python project. Workers and
+reviewers run Claude Haiku. Costs are Claude-reported.
+
+| Run | Work | Wall time | Result | Cost |
+|---|---|---|---|---|
+| 2 | Tickets 01 (subtract) and 02 (clamp_diff), one pair | 16 s and 13 s | Both passed on round 1 | about $0.025 |
+| 3 | Tickets 03 (multiply) and 04 (safe_divide), `wteam run --pairs 1` | 34 s | Stop report: 4 done, 0 blocked; orchestrator used 3 turns | about $0.056 |
+
+Run 1 stalled before these numbers: agents loaded user settings and Bash denials
+left the worker unable to submit. Agent isolation and the one-command rule fixed it.
 
 ## Reviews and the queue
 
