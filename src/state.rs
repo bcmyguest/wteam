@@ -178,6 +178,14 @@ pub struct RunSettings {
     /// (the run was killed before it could clear the flag).
     #[serde(default)]
     pub watcher_pid: Option<u32>,
+    /// `auto` or `model` (`wteam run --dispatch`). A state file without it predates the flag,
+    /// whose runs were orchestrator-driven, so it reads as `model`.
+    #[serde(default = "model_dispatch")]
+    pub dispatch: String,
+}
+
+fn model_dispatch() -> String {
+    "model".into()
 }
 
 impl Default for RunSettings {
@@ -190,6 +198,7 @@ impl Default for RunSettings {
             budget_tokens: None,
             active: false,
             watcher_pid: None,
+            dispatch: model_dispatch(),
         }
     }
 }

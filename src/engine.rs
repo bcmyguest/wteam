@@ -220,11 +220,53 @@ fn ticket_diff(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
     Ok(diff)
 }
 
+/// Run git in `dir` against `index` when given (`GIT_INDEX_FILE`), literal pathspecs when `literal`.
+fn git_index(dir: &Path, index: Option<&Path>, literal: bool, args: &[&str]) -> Result<String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C").arg(dir).args(args);
+    if let Some(index) = index {
+        cmd.env("GIT_INDEX_FILE", index);
+    }
+    if literal {
+        cmd.env("GIT_LITERAL_PATHSPECS", "1");
+    }
+    let out = cmd.output().context("running git")?;
+    if !out.status.success() {
+        bail!(
+            "git {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Unstage `scratch/`: the worker's throwaway notes are never ticket work. `index` selects a
+/// temporary index, else the worktree's own.
+fn unstage_scratch(dir: &Path, index: Option<&Path>) -> Result<()> {
+    git_index(
+        dir,
+        index,
+        false,
+        &[
+            "rm",
+            "-r",
+            "--cached",
+            "-q",
+            "--ignore-unmatch",
+            "--",
+            "scratch",
+        ],
+    )
+    .map(drop)
+}
+
 /// Stage the ticket's files and extras and commit only them. Returns the new sha.
 fn commit_ticket(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
     let msg = format!("feat: {} (wteam {})", t.title, t.id);
     if t.files.is_empty() {
         worktree::git(dir, &["add", "-A"])?;
+        unstage_scratch(dir, None)?;
         worktree::git(dir, &["commit", "--allow-empty", "-m", &msg])?;
     } else {
         let mut paths: Vec<String> = Vec::new();
@@ -255,6 +297,56 @@ fn commit_ticket(dir: &Path, t: &Ticket, extras: &[String]) -> Result<String> {
     Ok(worktree::git(dir, &["rev-parse", "HEAD"])?
         .trim()
         .to_string())
+}
+
+/// Commit the ticket's files and extras as one commit on the fork point `base`, dropping the
+/// branch's own history (wip commits from a block). Built in a temporary index, so the worktree
+/// and branch are untouched until the commit exists; only then does the worktree move to it.
+fn squash_commit(
+    ctx: &Ctx,
+    dir: &Path,
+    t: &Ticket,
+    extras: &[String],
+    base: &str,
+) -> Result<String> {
+    let index = ctx
+        .paths
+        .effort_dir()
+        .join(format!("squash-{}.index", t.id));
+    let msg = format!("feat: {} (wteam {})", t.title, t.id);
+    let idx = Some(index.as_path());
+    let built = (|| -> Result<String> {
+        git_index(dir, idx, false, &["read-tree", base])?;
+        if t.files.is_empty() {
+            git_index(dir, idx, false, &["add", "-A"])?;
+        } else {
+            for (literal, specs) in path_groups(t, extras) {
+                for f in specs.iter().copied() {
+                    // A pattern that matches nothing (a file the worker never touched) is fine.
+                    if let Err(e) = git_index(dir, idx, literal, &["add", "-A", "--", f])
+                        && !format!("{e:#}").contains("did not match any")
+                    {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        unstage_scratch(dir, idx)?;
+        let changed = git_index(dir, idx, false, &["diff", "--cached", "--name-only", base])?;
+        if !t.files.is_empty() && changed.trim().is_empty() {
+            bail!("nothing in the ticket's files changed");
+        }
+        let tree = git_index(dir, idx, false, &["write-tree"])?
+            .trim()
+            .to_string();
+        let sha = worktree::git(dir, &["commit-tree", &tree, "-p", base, "-m", &msg])?
+            .trim()
+            .to_string();
+        worktree::git(dir, &["reset", "--hard", &sha])?;
+        Ok(sha)
+    })();
+    let _ = std::fs::remove_file(&index);
+    built
 }
 
 /// Role `orchestrator` dispatches to (first `dispatch` route), else `worker`.
@@ -942,13 +1034,25 @@ fn advance_passed(
 }
 
 /// Commit the ticket, then under worktree isolation merge it onto main. Returns the landed sha.
+/// Under worktree isolation the commit comes first: a failed commit leaves the worktree as the
+/// worker left it. A branch with history past its fork point (wip commits) is squashed into the
+/// one commit. Afterwards the worktree is cleaned of everything uncommitted before the merge.
 fn land(ctx: &Ctx, t: &Ticket) -> Result<String> {
     let st = crate::state::load(&ctx.paths)?;
     let dir = ticket_dir(ctx, &t.id)?;
-    let sha = commit_ticket(&dir, t, &extras_of(&st, &t.id))?;
+    let extras = extras_of(&st, &t.id);
     if st.run.isolation != "worktree" {
-        return Ok(sha);
+        return commit_ticket(&dir, t, &extras);
     }
+    let base = worktree::fork_point(&ctx.paths, &t.id)?;
+    let head = worktree::git(&dir, &["rev-parse", "HEAD"])?;
+    if head.trim() == base {
+        commit_ticket(&dir, t, &extras)?;
+    } else {
+        squash_commit(ctx, &dir, t, &extras, &base)?;
+    }
+    worktree::git(&dir, &["reset", "--hard"])?;
+    worktree::git(&dir, &["clean", "-fdq"])?;
     let pair = st
         .tickets
         .get(&t.id)

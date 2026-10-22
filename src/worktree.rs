@@ -143,6 +143,14 @@ pub fn prepare(paths: &Paths, pair: u32, ticket: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// The commit the ticket branch forked from: everything after it is the ticket's own history.
+pub fn fork_point(paths: &Paths, ticket: &str) -> Result<String> {
+    let branch = branch(&paths.slug, ticket);
+    Ok(git(&paths.root, &["merge-base", &branch, "HEAD"])?
+        .trim()
+        .to_string())
+}
+
 /// Rebase the ticket branch onto the main tree's HEAD and fast-forward it in.
 /// A rebase conflict aborts the rebase and names the conflicting paths; main is untouched.
 /// On success removes the worktree and branch and returns the new main HEAD sha.

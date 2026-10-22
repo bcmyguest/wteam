@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::engine::Ctx;
 use crate::mailbox;
-use crate::state::{self, Event, State, TicketStatus};
+use crate::state::{self, Event, EventKind, State, TicketStatus};
 use crate::team::agents::{self, AgentDef};
 use crate::team::{NodeKind, parse_instance};
 use crate::transport::resume;
@@ -28,6 +28,8 @@ const ORCHESTRATOR: &str = "orchestrator.1";
 const HANDOFF_PROMPT: &str = "Your context is nearly full. Write your handoff baton now, with these sections: Goal, Confirmed facts, Ruled out, Next steps, Constraints, Blockers. Reply with the baton only.";
 /// Ends every kickoff and digest.
 const FILL_HINT: &str = "Run `wteam dispatch --fill` to keep pairs busy.";
+/// Ends every digest under `auto` dispatch: the watcher, not the orchestrator, dispatches.
+const AUTO_HINT: &str = "The watcher dispatches ready tickets itself. Act only on the events above, then end your turn.";
 /// Appended to every kickoff, before the fill hint.
 const INSTRUCTIONS: &str =
     "Then end your turn. The watcher resumes you with events; never call `wteam wait`.";
@@ -81,6 +83,9 @@ fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
         }
         Ok(())
     })?;
+    if is_auto(ctx)? {
+        return drive_auto(ctx, opts);
+    }
     let mut prompt = kickoff(ctx, None)?;
     let mut turns = 0;
     // Consecutive orchestrator turns that left dispatchable tickets undispatched.
@@ -138,6 +143,61 @@ fn drive(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
             Next::Stop(why) => return Ok(why),
         }
     }
+}
+
+/// True when `wteam run --dispatch auto` set the run's dispatch mode.
+fn is_auto(ctx: &Ctx) -> Result<bool> {
+    Ok(state::load(&ctx.paths)?.run.dispatch == "auto")
+}
+
+/// `auto` dispatch. The orchestrator is never prompted for dispatch: `await_next` fills the pairs
+/// as they free up. Each wake carries the blocked tickets and human gates; the first wake of a
+/// generation also carries the goal. A handoff's baton rides on the next wake.
+fn drive_auto(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
+    let mut turns = 0;
+    let mut carried: Option<String> = None;
+    loop {
+        let digest = match await_next(ctx, opts)? {
+            Next::Digest(digest) => digest,
+            Next::Stop(why) => return Ok(why),
+        };
+        if turns >= opts.max_turns {
+            return Ok(format!("--max-turns {} reached", opts.max_turns));
+        }
+        turns += 1;
+        let mut prompt = digest;
+        if let Some(baton) = carried.take() {
+            prompt = format!("{baton}\n\n{prompt}");
+        } else if fresh_orchestrator(ctx)? {
+            prompt = format!("{}\n\n{prompt}", goal(ctx)?);
+        }
+        if let Err(e) = orchestrator_turn(ctx, &prompt) {
+            return Ok(turn_failed(&e));
+        }
+        if handoff_due(ctx)? {
+            turns += 1;
+            let baton = match orchestrator_turn(ctx, HANDOFF_PROMPT) {
+                Ok(baton) => baton,
+                Err(e) => return Ok(turn_failed(&e)),
+            };
+            carried = Some(next_generation(ctx, &baton)?);
+        }
+    }
+}
+
+/// True when the orchestrator has no session yet: its next turn is the first of a generation.
+fn fresh_orchestrator(ctx: &Ctx) -> Result<bool> {
+    let s = state::load(&ctx.paths)?;
+    Ok(s.agents
+        .get(ORCHESTRATOR)
+        .is_none_or(|a| a.session_id.is_none()))
+}
+
+/// The goal and pair count that open a generation's first prompt.
+fn goal(ctx: &Ctx) -> Result<String> {
+    let spec = std::fs::read_to_string(ctx.paths.spec_file()).unwrap_or_default();
+    let pairs = state::load(&ctx.paths)?.run.pairs;
+    Ok(format!("Goal:\n{spec}\nPairs: {pairs}"))
 }
 
 /// Stop reason for an orchestrator turn that failed.
@@ -274,21 +334,24 @@ fn next_generation(ctx: &Ctx, baton: &str) -> Result<String> {
 /// and ready tickets. With one: the baton and `wteam status`.
 fn kickoff(ctx: &Ctx, baton: Option<&str>) -> Result<String> {
     let ready = wteam_output(ctx, "ready")?;
+    let hint = hint(is_auto(ctx)?);
     Ok(match baton {
         None => {
-            let goal = std::fs::read_to_string(ctx.paths.spec_file()).unwrap_or_default();
-            let pairs = state::load(&ctx.paths)?.run.pairs;
-            format!(
-                "Goal:\n{goal}\nPairs: {pairs}\n\nReady:\n{ready}\n\n{INSTRUCTIONS}\n{FILL_HINT}"
-            )
+            let goal = goal(ctx)?;
+            format!("{goal}\n\nReady:\n{ready}\n\n{INSTRUCTIONS}\n{hint}")
         }
         Some(baton) => {
             let status = wteam_output(ctx, "status")?;
             format!(
-                "Handoff from the previous orchestrator generation:\n{baton}\n\nStatus:\n{status}\n\n{INSTRUCTIONS}\n{FILL_HINT}"
+                "Handoff from the previous orchestrator generation:\n{baton}\n\nStatus:\n{status}\n\n{INSTRUCTIONS}\n{hint}"
             )
         }
     })
+}
+
+/// The line that ends a kickoff or digest, by dispatch mode.
+fn hint(auto: bool) -> &'static str {
+    if auto { AUTO_HINT } else { FILL_HINT }
 }
 
 /// Stdout of `wteam <cmd>` run from the repo root with this effort selected.
@@ -312,10 +375,14 @@ fn wteam_output(ctx: &Ctx, cmd: &str) -> Result<String> {
 /// Wait until the orchestrator has a digest, or the run must stop.
 fn await_next(ctx: &Ctx, opts: &RunOptions) -> Result<Next> {
     let deadline = Instant::now() + Duration::from_secs(opts.timeout_secs);
+    let auto = is_auto(ctx)?;
     loop {
         // Re-deliver to agents whose turn process died mid-run, not only at command start.
         crate::engine::heal(ctx)?;
-        let snap = snapshot(ctx)?;
+        if auto && let Err(e) = crate::engine::fill(ctx) {
+            return Ok(Next::Stop(format!("dispatch failed: {e:#}")));
+        }
+        let snap = snapshot(ctx, auto)?;
         if let Some((used, budget)) = snap.over_budget {
             // No new work: let what is in flight finish, then stop.
             if !snap.in_flight {
@@ -344,7 +411,7 @@ fn await_next(ctx: &Ctx, opts: &RunOptions) -> Result<Next> {
 
 /// Read the run once. Takes the orchestrator's pending events and mail unless the budget
 /// is spent; a spent budget leaves them unread.
-fn snapshot(ctx: &Ctx) -> Result<Snapshot> {
+fn snapshot(ctx: &Ctx, auto: bool) -> Result<Snapshot> {
     let tickets = work::load_tickets(&ctx.paths.tickets_dir())?;
     state::with_state(&ctx.paths, |s| {
         let over_budget = over_budget(s);
@@ -373,6 +440,12 @@ fn snapshot(ctx: &Ctx) -> Result<Snapshot> {
         if let Some(last) = events.last() {
             s.events_consumed = last.seq;
         }
+        // Under `auto` only a block or a human gate wakes the orchestrator; other events are
+        // consumed unseen.
+        let events: Vec<Event> = events
+            .into_iter()
+            .filter(|e| !auto || matches!(e.kind, EventKind::Blocked | EventKind::NeedsApproval))
+            .collect();
         let st = s.agents.entry(ORCHESTRATOR.to_string()).or_default();
         let (mail, end) = mailbox::read_from(&ctx.paths, ORCHESTRATOR, st.mail_delivered)?;
         st.mail_delivered = end;
@@ -391,8 +464,9 @@ fn snapshot(ctx: &Ctx) -> Result<Snapshot> {
         }
         let digest = (!parts.is_empty()).then(|| {
             format!(
-                "Events since your last turn:\n\n{}\n\n{FILL_HINT}",
-                parts.join("\n\n")
+                "Events since your last turn:\n\n{}\n\n{}",
+                parts.join("\n\n"),
+                hint(auto)
             )
         });
         Ok(Snapshot {

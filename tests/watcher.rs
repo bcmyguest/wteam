@@ -93,7 +93,7 @@ if [ -f "$WTEAM_FAKE_DIR/handoffs-asked" ]; then echo "tokens: 1000"; else echo 
     r.agent_script("worker", WORKER);
     r.agent_script("reviewer", REVIEWER);
 
-    let text = run_ok(&r, &[]);
+    let text = run_ok(&r, &["--dispatch", "model"]);
 
     assert_eq!(
         r.read(".wteam-fake/handoffs-asked").lines().count(),
@@ -146,7 +146,7 @@ fn budget_stops_dispatching_once_tokens_exceed_it() {
     // Slow reviewer: the worker's turn records its tokens before the pass lands.
     r.agent_script("reviewer", &format!("sleep 1\n{REVIEWER}"));
 
-    let text = run_ok(&r, &["--budget-tokens", "100"]);
+    let text = run_ok(&r, &["--dispatch", "model", "--budget-tokens", "100"]);
 
     // The in-flight ticket finishes; nothing new is dispatched.
     assert!(text.contains("token budget of 100 exceeded"), "{text}");
@@ -166,7 +166,7 @@ fn max_turns_stops_with_reason() {
     r.agent_script("worker", WORKER);
     r.agent_script("reviewer", REVIEWER);
 
-    let text = run_ok(&r, &["--max-turns", "1"]);
+    let text = run_ok(&r, &["--dispatch", "model", "--max-turns", "1"]);
 
     assert!(
         text.contains("Run stopped: --max-turns 1 reached"),
@@ -227,7 +227,17 @@ fn all_idle_pairs_dirty_stops_with_dirty_reason() {
     ]);
     r.write(".wteam/demo/worktrees/pair1/stray.txt", "left behind");
 
-    let text = run_ok(&r, &["--pairs", "1", "--isolation", "worktree"]);
+    let text = run_ok(
+        &r,
+        &[
+            "--dispatch",
+            "model",
+            "--pairs",
+            "1",
+            "--isolation",
+            "worktree",
+        ],
+    );
 
     assert!(
         text.contains("Run stopped: no usable pair: dirty worktrees on pair 1."),
@@ -250,7 +260,7 @@ fn undispatched_ready_tickets_stop_after_two_idle_turns() {
     r.agent_script("worker", WORKER);
     r.agent_script("reviewer", REVIEWER);
 
-    let text = run_ok(&r, &[]);
+    let text = run_ok(&r, &["--dispatch", "model"]);
 
     assert!(
         text.contains("Run stopped: orchestrator did not dispatch ready tickets: 01, 02"),
@@ -279,7 +289,7 @@ fn context_window_triggers_handoff_at_three_quarters() {
     r.agent_script("worker", WORKER);
     r.agent_script("reviewer", REVIEWER);
 
-    let text = run_ok(&r, &[]);
+    let text = run_ok(&r, &["--dispatch", "model"]);
 
     assert_eq!(
         r.read(".wteam-fake/handoffs-asked").lines().count(),
@@ -304,7 +314,7 @@ fn dead_worker_turn_is_redelivered_mid_run() {
     );
     r.agent_script("reviewer", REVIEWER);
 
-    let text = run_ok(&r, &["--timeout", "60"]);
+    let text = run_ok(&r, &["--dispatch", "model", "--timeout", "60"]);
 
     assert!(r.fake_dir().join("killed").exists());
     assert!(!text.contains("timed out"), "{text}");
@@ -325,7 +335,7 @@ fn mail_sent_to_orchestrator_mid_turn_waits_for_digest() {
     r.agent_script("worker", WORKER);
     r.agent_script("reviewer", REVIEWER);
 
-    let text = run_ok(&r, &[]);
+    let text = run_ok(&r, &["--dispatch", "model"]);
 
     // A detached turn would run with the bare mail as its prompt; a digest prefixes it with
     // "Events since". No prompt may start with the mail, and the mail must arrive in a digest.
@@ -382,7 +392,7 @@ fn stop_ends_foreground_orchestrator_turn_and_spares_the_watcher() {
     r.agent_script("reviewer", REVIEWER);
     // The watcher gets its own process group, so a stop that signalled it would show.
     let mut watcher = std::process::Command::new(assert_cmd::cargo::cargo_bin("wteam"))
-        .arg("run")
+        .args(["run", "--dispatch", "model"])
         .current_dir(r.path())
         .env_remove("WTEAM_AGENT")
         .env("WTEAM_ROOT", r.path())
@@ -464,7 +474,17 @@ sleep 2
     r.agent_script("worker", &format!("{WORKER}echo \"tokens: 500\"\n"));
     r.agent_script("reviewer", REVIEWER);
 
-    let text = run_ok(&r, &["--pairs", "2", "--budget-tokens", "100"]);
+    let text = run_ok(
+        &r,
+        &[
+            "--dispatch",
+            "model",
+            "--pairs",
+            "2",
+            "--budget-tokens",
+            "100",
+        ],
+    );
 
     assert!(
         text.contains("Run stopped: token budget of 100 exceeded"),
@@ -541,7 +561,17 @@ fn one_per_turn_run(pairs: u32, tickets: u32) -> (Repo, String) {
     r.agent_script("worker", &format!("sleep 1\n{WORKER}"));
     r.agent_script("reviewer", REVIEWER);
     let pairs = pairs.to_string();
-    let text = run_ok(&r, &["--pairs", &pairs, "--isolation", "worktree"]);
+    let text = run_ok(
+        &r,
+        &[
+            "--dispatch",
+            "model",
+            "--pairs",
+            &pairs,
+            "--isolation",
+            "worktree",
+        ],
+    );
     (r, text)
 }
 
@@ -574,4 +604,133 @@ fn kickoff_and_digest_end_with_the_fill_hint() {
             >= 2,
         "{prompts}"
     );
+}
+
+#[test]
+fn auto_dispatch_finishes_every_ticket_with_no_orchestrator_turn() {
+    let r = Repo::new("demo");
+    for n in 1..=6 {
+        let id = format!("0{n}");
+        r.ticket(
+            &id,
+            &format!("Ticket {n}"),
+            "None",
+            &format!("src/{id}.txt"),
+            "",
+        );
+    }
+    r.use_fake_agents();
+    r.agent_script(
+        "orchestrator",
+        "echo called >> \"$WTEAM_FAKE_DIR/orch-called\"\nexit 1\n",
+    );
+    r.agent_script("worker", WORKER);
+    r.agent_script("reviewer", REVIEWER);
+
+    let text = run_ok(&r, &["--pairs", "2"]);
+
+    assert!(
+        text.contains("Run stopped: no ticket is runnable or in progress"),
+        "{text}"
+    );
+    assert!(text.contains("Dispatch: auto"), "{text}");
+    for n in 1..=6 {
+        assert_eq!(status_of(&r, &format!("0{n}")), "done", "{text}");
+    }
+    assert!(!r.path().join(".wteam-fake/orch-called").exists(), "{text}");
+}
+
+#[test]
+fn auto_wakes_orchestrator_once_for_a_block() {
+    let r = Repo::new("demo");
+    r.ticket("01", "Ticket one", "None", "src/01.txt", "");
+    r.use_fake_agents();
+    r.agent_script(
+        "orchestrator",
+        "printf '%s\\n=====\\n' \"$WTEAM_PROMPT\" >> \"$WTEAM_FAKE_DIR/orch-prompts\"\nwteam requeue 01 --note retry || exit 1\n",
+    );
+    r.agent_script(
+        "worker",
+        r#"T=$(wteam status | awk -v a="$WTEAM_AGENT" '$NF==a && $0 ~ /\[doing\]/ {print $1; exit}')
+if [ ! -f "$WTEAM_FAKE_DIR/tried" ]; then
+  touch "$WTEAM_FAKE_DIR/tried"
+  wteam block "$T" --reason flaky || exit 1
+  exit 0
+fi
+mkdir -p src
+echo edit >> "src/$T.txt"
+wteam submit "$T" --summary "did $T" || exit 1
+"#,
+    );
+    r.agent_script("reviewer", REVIEWER);
+
+    let text = run_ok(&r, &[]);
+
+    assert_eq!(prompts(&r), 1, "{text}");
+    let seen = r.read(".wteam-fake/orch-prompts");
+    assert!(seen.contains("blocked 01: flaky"), "{seen}");
+    assert_eq!(status_of(&r, "01"), "done", "{text}");
+}
+
+#[test]
+fn model_dispatch_keeps_orchestrator_driven_dispatch() {
+    let r = chain();
+    r.agent_script("orchestrator", DISPATCH);
+    r.agent_script("worker", WORKER);
+    r.agent_script("reviewer", REVIEWER);
+
+    let text = run_ok(&r, &["--dispatch", "model"]);
+
+    assert!(text.contains("Dispatch: model"), "{text}");
+    assert!(prompts(&r) >= 1, "{text}");
+    assert_eq!(status_of(&r, "03"), "done", "{text}");
+}
+
+#[test]
+fn run_and_report_json_carry_the_dispatch_mode() {
+    let r = Repo::new("demo");
+    r.use_fake_agents();
+    r.agent_script("orchestrator", "echo ok\n");
+    for mode in ["auto", "model"] {
+        let out = r
+            .wteam()
+            .args(["--json", "run", "--dispatch", mode])
+            .assert()
+            .success();
+        let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+        assert_eq!(v["dispatch"], mode, "{v}");
+        let out = r.wteam().args(["--json", "report"]).assert().success();
+        let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+        assert_eq!(v["dispatch"], mode, "{v}");
+    }
+}
+
+#[test]
+fn auto_with_every_ticket_blocked_stops_with_a_report() {
+    let r = Repo::new("demo");
+    r.ticket("01", "Ticket one", "None", "src/01.txt", "");
+    r.ticket("02", "Ticket two", "None", "src/02.txt", "");
+    r.use_fake_agents();
+    // The orchestrator reads the blocks and leaves them blocked.
+    r.agent_script(
+        "orchestrator",
+        "printf '%s\\n=====\\n' \"$WTEAM_PROMPT\" >> \"$WTEAM_FAKE_DIR/orch-prompts\"\n",
+    );
+    r.agent_script(
+        "worker",
+        "T=$(wteam status | awk -v a=\"$WTEAM_AGENT\" '$NF==a && $0 ~ /\\[doing\\]/ {print $1; exit}')\nwteam block \"$T\" --reason nope || exit 1\n",
+    );
+    r.agent_script("reviewer", REVIEWER);
+
+    let text = run_ok(&r, &["--timeout", "60"]);
+
+    assert!(
+        text.contains("Run stopped: no ticket is runnable or in progress"),
+        "{text}"
+    );
+    assert!(text.contains("- 01: Ticket one"), "{text}");
+    assert!(text.contains("- 02: Ticket two"), "{text}");
+    assert_eq!(status_of(&r, "01"), "blocked", "{text}");
+    assert_eq!(status_of(&r, "02"), "blocked", "{text}");
+    assert!(prompts(&r) <= 2, "{text}");
 }

@@ -35,7 +35,7 @@ Done when the user says go.
 
 ## 4. Run
 
-Run `wteam run --pairs N --slug <slug>`. It runs long: use a background task where the harness offers one, else the foreground. The watcher in `wteam run` waits and feeds the orchestrator; never call `wteam wait` yourself. Add `--budget-tokens <n>` when the user sets a token cap.
+Run `wteam run --pairs N --slug <slug>`. It runs long: use a background task where the harness offers one, else the foreground. The watcher in `wteam run` waits and feeds the orchestrator; never call `wteam wait` yourself. Add `--budget-tokens <n>` when the user sets a token cap. `--dispatch auto` (the default) has the watcher dispatch ready tickets itself and wakes the orchestrator only for blocked tickets and human gates. `--dispatch model` has the orchestrator dispatch every ticket, as before.
 
 Done when `wteam run` exits and prints the stop report.
 

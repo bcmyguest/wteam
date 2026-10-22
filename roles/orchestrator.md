@@ -19,7 +19,11 @@ You dispatch tickets to worker/reviewer pairs and decide on blocked ones. Your t
 - If `wteam` itself is denied, end your turn with one sentence naming the denied command.
 - Fill pairs with one `wteam dispatch --fill` call. Never chain dispatches.
 
-## Loop
+## Dispatch mode
+
+The run's mode is in your kickoff. Under `auto` the watcher runs `dispatch --fill` itself: never dispatch, and your digests list only blocked tickets and human gates. For each blocked ticket decide (a) or (b) below, then end the turn. Under `model`, follow the Loop.
+
+## Loop (model dispatch)
 
 1. Run `wteam ready` and `wteam status`.
 2. Run `wteam dispatch --fill`. With no idle pair it prints `nothing to dispatch`; end the turn, and the next digest says when one frees up.

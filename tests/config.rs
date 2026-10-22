@@ -128,7 +128,15 @@ fn promoted_team_agents_resolve_for_run() {
         .success();
     std::fs::remove_dir_all(repo.path().join(".wteam/agents")).unwrap();
     repo.wteam()
-        .args(["run", "--team", "mine", "--timeout", "20"])
+        .args([
+            "run",
+            "--team",
+            "mine",
+            "--timeout",
+            "20",
+            "--dispatch",
+            "model",
+        ])
         .assert()
         .success();
     assert!(

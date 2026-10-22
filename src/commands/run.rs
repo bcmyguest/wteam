@@ -41,6 +41,7 @@ pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
             budget_tokens: a.budget_tokens,
             active: true,
             watcher_pid: Some(std::process::id()),
+            dispatch: a.dispatch.name().to_string(),
         };
         Ok(())
     })?;
@@ -58,6 +59,6 @@ pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
         Ok(())
     })?;
     let report = result?;
-    let value = json!({ "report": &report });
+    let value = json!({ "report": &report, "dispatch": a.dispatch.name() });
     Ok(Out::new(report, value))
 }

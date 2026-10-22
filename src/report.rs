@@ -56,6 +56,7 @@ fn recommended_action(reason: &str, paths: &Paths) -> String {
 pub fn report_data(paths: &Paths) -> Result<Value> {
     let tickets = work::load_tickets(&paths.tickets_dir())?;
     let state = crate::state::load(paths)?;
+    let dispatch = state.run.dispatch.clone();
     let title = |id: &str| {
         tickets
             .iter()
@@ -110,6 +111,7 @@ pub fn report_data(paths: &Paths) -> Result<Value> {
         "blocked": blocked,
         "follow_ups": { "promote": promote, "watching": watching },
         "dirty_worktrees": dirty,
+        "dispatch": dispatch,
         "next_step": next_step,
     }))
 }
@@ -144,6 +146,10 @@ pub fn stop_report(paths: &Paths) -> Result<String> {
             s(b, "action")
         ));
     }
+    out.push_str(&format!(
+        "Dispatch: {}\n",
+        data["dispatch"].as_str().unwrap_or_default()
+    ));
     let dirty: Vec<String> = rows(&data["dirty_worktrees"])
         .iter()
         .filter_map(Value::as_u64)

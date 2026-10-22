@@ -445,3 +445,80 @@ fn fill_error_midway_still_lists_the_dispatches_that_stand() {
     assert_eq!(r.state()["tickets"]["01"]["status"], "doing");
     go(&r);
 }
+
+/// Worker that blocks its first attempt with a wip commit and a scratch file, then edits only
+/// its ticket's file.
+const WIP_THEN_CLEAN_WORKER: &str = r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+mkdir -p src scratch
+if [ ! -f "$WTEAM_FAKE_DIR/tried" ]; then
+  touch "$WTEAM_FAKE_DIR/tried"
+  echo wip > src/wip.txt
+  echo notes > scratch/notes.txt
+  wteam block "$id" --reason "stuck"
+  exit 0
+fi
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id"
+"#;
+
+#[test]
+fn landed_ticket_squashes_its_wip_history_into_one_commit_of_its_files() {
+    let r = repo_with_pairs(1);
+    r.agent_script("worker", WIP_THEN_CLEAN_WORKER);
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "src/01.txt", "");
+    let before: u32 = r
+        .git(&["rev-list", "--count", "main"])
+        .trim()
+        .parse()
+        .unwrap();
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "blocked");
+    r.wteam().args(["requeue", "01"]).assert().success();
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+
+    let after: u32 = r
+        .git(&["rev-list", "--count", "main"])
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(after, before + 1);
+    assert_eq!(
+        r.git(&["log", "-1", "--format=%s", "main"]).trim(),
+        "feat: Add one (wteam 01)"
+    );
+    assert_eq!(
+        r.git(&["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])
+            .trim(),
+        "src/01.txt"
+    );
+    assert!(!r.path().join("scratch/notes.txt").exists());
+}
+
+/// A ticket without `Files:` commits everything it touched except `scratch/`.
+#[test]
+fn filesless_ticket_commits_everything_but_scratch() {
+    let r = repo_with_pairs(1);
+    r.agent_script(
+        "worker",
+        r#"
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+mkdir -p src scratch
+echo notes > scratch/notes.txt
+echo edit >> "src/$id.txt"
+wteam submit "$id" --summary "edited $id"
+"#,
+    );
+    r.agent_script("reviewer", REVIEWER_PASS);
+    r.ticket("01", "Add one", "None", "", "");
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |s| s["tickets"]["01"]["status"] == "done");
+
+    assert_eq!(
+        r.git(&["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])
+            .trim(),
+        "src/01.txt"
+    );
+}

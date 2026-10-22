@@ -205,6 +205,29 @@ pub struct RunArgs {
     /// Stop the run once the agents' summed context tokens exceed this.
     #[arg(long)]
     pub budget_tokens: Option<u64>,
+    /// `auto`: the watcher dispatches ready tickets itself and wakes the orchestrator only for
+    /// blocked tickets and human gates. `model`: the orchestrator dispatches every ticket.
+    #[arg(long, value_enum, default_value_t = DispatchMode::Auto)]
+    pub dispatch: DispatchMode,
+}
+
+/// Who dispatches ready tickets during `wteam run`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum DispatchMode {
+    /// The watcher dispatches; the orchestrator wakes only for blocks and human gates.
+    Auto,
+    /// The orchestrator dispatches every ticket.
+    Model,
+}
+
+impl DispatchMode {
+    /// The name stored in run settings and shown in reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Model => "model",
+        }
+    }
 }
 
 #[derive(Debug, Args)]

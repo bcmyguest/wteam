@@ -41,6 +41,7 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `--transport <name>` | from config, else `resume` | How a mail starts a turn |
 | `--timeout <secs>` | 7200 | Seconds to wait for agent turns before stopping |
 | `--max-turns <n>` | 200 | Orchestrator turns, handoff turns included |
+| `--dispatch <auto\|model>` | `auto` | `auto`: the watcher dispatches ready tickets and wakes the orchestrator only for blocks and human gates. `model`: the orchestrator dispatches every ticket |
 | `--budget-tokens <n>` | none | Stop new work once summed agent context tokens exceed `n` |
 | `--isolation <none\|worktree>` | `none` | `worktree` is not available yet |
 

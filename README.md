@@ -72,9 +72,11 @@ Every command accepts `--json`. The full walkthrough is in the
 
 ## Running a team
 
-`wteam run` drives the orchestrator turn by turn. It feeds the orchestrator
-digests of worker and reviewer events until nothing is runnable, then prints a
-stop report:
+`wteam run` drives the team until nothing is runnable, then prints a stop report.
+With `--dispatch auto` (the default) the watcher dispatches ready tickets to idle
+pairs itself, and the orchestrator is woken only for blocked tickets and human
+gates. With `--dispatch model` the orchestrator dispatches every ticket and gets a
+digest of each worker and reviewer event:
 
 ```bash
 wteam run --pairs 2 --budget-tokens 2000000 --max-turns 200
@@ -82,6 +84,8 @@ wteam run --pairs 2 --budget-tokens 2000000 --max-turns 200
 
 - `--budget-tokens` stops new work once the agents' summed context tokens exceed
   the budget. In-flight turns finish first.
+- `--dispatch auto|model` picks who dispatches (default `auto`). `model` also
+  spends an orchestrator turn on every dispatch.
 - `--max-turns` caps orchestrator turns. Handoff turns count toward it.
 - The orchestrator hands off to a new generation when its context passes
   `min(handoff_tokens, 0.75 × context_window)`. The handoff is written to
