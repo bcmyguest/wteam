@@ -166,6 +166,20 @@ prefix_rule(pattern=["rm", "-rf"], decision="forbidden")
     }
 
     #[test]
+    fn review_scratch_edit_is_lossy_workspace_write() {
+        let t = translate(&builtin("review").unwrap(), "reviewer").unwrap();
+        let edit = t
+            .support
+            .iter()
+            .find(|s| s.rule == "Edit(scratch/**)")
+            .unwrap();
+        assert_eq!(
+            edit.support,
+            Support::Lossy("sandbox workspace-write".into())
+        );
+    }
+
+    #[test]
     fn profile_without_edit_or_wteam_is_read_only() {
         let p = Profile {
             name: "x".into(),

@@ -81,6 +81,16 @@ fn worker_names_its_commands() {
 }
 
 #[test]
+fn reviewer_writes_checks_only_under_scratch() {
+    assert_mentions(
+        "reviewer",
+        &[
+            "Write your own checks and your verdict file under `scratch/` with the file-editing tool; edit nothing else.",
+        ],
+    );
+}
+
+#[test]
 fn reviewer_submits_verdict_via_file() {
     assert_mentions(
         "reviewer",
@@ -306,18 +316,30 @@ fn orchestrator_runs_one_command_per_shell_call_and_fills_pairs() {
 
 #[test]
 fn worker_and_reviewer_create_files_with_edit_tool() {
-    for name in ["worker", "reviewer"] {
-        assert_mentions(
-            name,
-            &[
-                "1. Run `mkdir -p scratch` as its own command.",
-                "2. Create `scratch/check_<name>.py` with the file-editing tool.",
-                "3. Run `python3 scratch/check_<name>.py` as one line.",
-                "Never write file contents through the shell",
-                "Never run a multi-line command",
-            ],
-        );
-    }
+    assert_mentions(
+        "worker",
+        &[
+            "1. Run `mkdir -p scratch` as its own command.",
+            "2. Create `scratch/check_<name>.py` with the file-editing tool.",
+            "3. Run `python3 scratch/check_<name>.py` as one line.",
+            "Never write file contents through the shell",
+            "Never run a multi-line command",
+        ],
+    );
+    // The review profile has no mkdir allow; the file-editing tool creates `scratch/`.
+    assert_mentions(
+        "reviewer",
+        &[
+            "1. Create `scratch/check_<name>.py` with the file-editing tool. It creates `scratch/`.",
+            "2. Run `python3 scratch/check_<name>.py` as one line.",
+            "Never write file contents through the shell",
+            "Never run a multi-line command",
+        ],
+    );
+    assert!(
+        !role("reviewer").contains("mkdir"),
+        "roles/reviewer.md must not run mkdir: review denies it"
+    );
 }
 
 #[test]

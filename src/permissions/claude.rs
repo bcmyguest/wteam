@@ -89,4 +89,20 @@ mod tests {
         // dontAsk denies every edit that no allow rule names.
         assert_eq!(t.args[3], "dontAsk");
     }
+
+    #[test]
+    fn review_profile_golden() {
+        let t = translate(&builtin("review").unwrap(), "reviewer").unwrap();
+        assert_eq!(
+            t.args,
+            [
+                "--settings",
+                r#"{"permissions":{"allow":["Read(**)","Bash(wteam *)","Bash(git diff *)","Bash(git log *)","Bash(cargo test *)","Bash(npm test *)","Bash(pytest *)","Bash(cd *)","Bash(ls *)","Bash(cat *)","Bash(head *)","Bash(tail *)","Bash(grep *)","Bash(rg *)","Bash(wc *)","Bash(pwd)","Bash(python3 -m pytest *)","Bash(go test *)","Bash(make test)","Bash(make check)","Bash(python3 *)","Bash(python *)","Bash(node *)","Bash(go *)","Bash(cargo *)","Bash(npm *)","Edit(scratch/**)"],"ask":[],"deny":[]}}"#,
+                "--permission-mode",
+                "dontAsk",
+            ]
+        );
+        assert!(t.support.iter().all(|s| s.support == Support::Exact));
+        assert!(!t.args[1].contains("Edit(**)"));
+    }
 }

@@ -22,7 +22,7 @@ Run `wteam permissions` to print the current matrix. Filter with
 | Profile | Allow | Ask | Deny |
 |---|---|---|---|
 | `control` | `Bash(wteam *)`, `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Read(**)` | | `Edit(**)` |
-| `review` | `Read(**)`, `Bash(wteam *)`, `Bash(git diff *)`, `Bash(git log *)`, toolchains (`python3 *`, `python *`, `node *`, `go *`, `cargo *`, `npm *`, `pytest *`), test runners (`cargo test`, `npm test`, `python3 -m pytest`, `go test`, `make test`, `make check`) | | `Edit(**)` |
+| `review` | `Read(**)`, `Edit(scratch/**)`, `Bash(wteam *)`, `Bash(git diff *)`, `Bash(git log *)`, toolchains (`python3 *`, `python *`, `node *`, `go *`, `cargo *`, `npm *`, `pytest *`), test runners (`cargo test`, `npm test`, `python3 -m pytest`, `go test`, `make test`, `make check`) | | |
 | `edit` | `Read(**)`, `Edit(**)`, `Bash(wteam *)`, `Bash(git diff *)`, `Bash(git status *)`, `Bash(mkdir *)`, `Bash(python3 *)`, `Bash(python *)`, `Bash(node *)`, `Bash(go *)`, `Bash(cargo *)`, `Bash(npm *)`, `Bash(pytest *)`, the test runners above | `Bash(git push *)` | `Read(**/.env)`, `Bash(rm -rf *)` |
 | `plan` | `Read(**)`, `Edit(.wteam/**)`, `Bash(wteam *)`, `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(ls *)`, `Bash(cat *)`, `Bash(head *)`, `Bash(tail *)`, `Bash(grep *)`, `Bash(rg *)`, `Bash(wc *)`, `Bash(pwd)`, `Bash(cd *)` | | |
 | `full` | bypass all permissions | | |
@@ -34,6 +34,16 @@ Run `wteam permissions` to print the current matrix. Filter with
 - cursor: `Write` is limited to `.wteam/**`.
 - codex: any allowed edit switches the whole sandbox to workspace-write (≈). On codex the planner can edit the whole workspace.
 - pi: nothing is enforced (✘).
+
+`review` is for the reviewer: it reads code, runs checks and writes only under `scratch/`. What each CLI enforces:
+
+- claude: `Edit`/`Write` outside `scratch/` are denied (`dontAsk` denies anything not allowed).
+- opencode: `edit` outside `scratch/` is denied (catch-all deny).
+- cursor: `Write` is limited to `scratch/**`.
+- codex: any allowed edit switches the whole sandbox to workspace-write (≈). On codex the reviewer can edit the whole workspace.
+- pi: nothing is enforced (✘).
+
+On every CLI, the interpreters and build tools `review` allows (`python3`, `node`, `go`, `cargo`, `npm`, `pytest`) can still write files through Bash.
 
 The `Bash` allows are not writer-free on every CLI: `git diff --output=<file>` writes a file. Drop `Bash(git diff *)` if that matters for your setup.
 

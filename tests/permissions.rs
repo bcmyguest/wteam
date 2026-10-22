@@ -169,3 +169,21 @@ fn plan_profile_edits_only_wteam_for_claude() {
         "{text}"
     );
 }
+
+#[test]
+fn review_profile_edits_only_scratch_for_claude() {
+    let r = Repo::new("demo");
+    let out = r
+        .wteam()
+        .args(["permissions", "--profile", "review", "--cli", "claude"])
+        .assert()
+        .success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("Edit(scratch/**)"), "{text}");
+    assert!(
+        !text
+            .lines()
+            .any(|l| l.starts_with("deny") && l.contains("Edit(**)")),
+        "{text}"
+    );
+}

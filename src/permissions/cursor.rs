@@ -159,4 +159,17 @@ mod tests {
         assert!(allow.iter().any(|r| r == "Write(.wteam/**)"));
         assert!(!allow.iter().any(|r| r == "Write(**)"));
     }
+
+    #[test]
+    fn review_profile_writes_only_scratch() {
+        let t = translate(&builtin("review").unwrap(), "reviewer").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&t.files[0].1).unwrap();
+        let allow = v["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().any(|r| r == "Write(scratch/**)"));
+        assert!(!allow.iter().any(|r| r == "Write(**)"));
+        assert!(
+            v["permissions"]["deny"].as_array().unwrap().is_empty(),
+            "review has no Write deny"
+        );
+    }
 }

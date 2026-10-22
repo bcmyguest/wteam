@@ -21,9 +21,10 @@ Run exactly one command per shell call: no `&&`, `;` or `|`. Run commands from y
 
 ## Scratch checks
 
-1. Run `mkdir -p scratch` as its own command.
-2. Create `scratch/check_<name>.py` with the file-editing tool.
-3. Run `python3 scratch/check_<name>.py` as one line.
+Write your own checks and your verdict file under `scratch/` with the file-editing tool; edit nothing else.
+
+1. Create `scratch/check_<name>.py` with the file-editing tool. It creates `scratch/`.
+2. Run `python3 scratch/check_<name>.py` as one line.
 
 ## Extra paths
 

@@ -177,13 +177,11 @@ mod tests {
     }
 
     #[test]
-    fn read_only_profile_denies_edit() {
+    fn review_profile_edits_only_scratch() {
         let t = translate(&builtin("review").unwrap(), "reviewer").unwrap();
-        assert!(
-            t.env[0].1.contains(r#""edit":{"*":"deny"}"#),
-            "{}",
-            t.env[0].1
-        );
+        let v: serde_json::Value = serde_json::from_str(&t.env[0].1).unwrap();
+        assert_eq!(v["edit"]["*"], "deny");
+        assert_eq!(v["edit"]["scratch/**"], "allow");
     }
 
     #[test]

@@ -153,6 +153,9 @@ pub fn builtin(name: &str) -> Option<Profile> {
             &["Edit(**)"],
         ),
         "review" => (
+            // Reviewers write their checks and verdict under `scratch/` only. No `Edit(**)` deny:
+            // claude and cursor resolve deny before allow, which would shadow `scratch/**`. Edits
+            // outside `scratch/` are denied by default on claude, opencode and cursor.
             &[
                 "Read(**)",
                 "Bash(wteam *)",
@@ -180,9 +183,10 @@ pub fn builtin(name: &str) -> Option<Profile> {
                 "Bash(go *)",
                 "Bash(cargo *)",
                 "Bash(npm *)",
+                "Edit(scratch/**)",
             ],
             &[],
-            &["Edit(**)"],
+            &[],
         ),
         "edit" => (
             &[
@@ -610,6 +614,32 @@ mod tests {
                 .support
                 .iter()
                 .find(|s| s.rule == "Edit(.wteam/**)")
+                .unwrap_or_else(|| panic!("{cli} lacks the Edit row"));
+            assert_eq!(edit.support, want, "{cli}");
+        }
+    }
+
+    #[test]
+    fn review_profile_edits_only_scratch() {
+        let review = builtin("review").unwrap();
+        assert!(review.deny.is_empty() && review.ask.is_empty());
+        assert!(review.allow.iter().any(|a| a == "Edit(scratch/**)"));
+        assert!(!review.allow.iter().any(|a| a == "Edit(**)"));
+        // Same CLI split as `plan`: path-scoped on claude, opencode and cursor; codex switches
+        // the whole sandbox; pi enforces nothing.
+        let expected = [
+            ("claude", Support::Exact),
+            ("opencode", Support::Exact),
+            ("cursor", Support::Exact),
+            ("codex", Support::Lossy("sandbox workspace-write".into())),
+            ("pi", Support::Unsupported(pi::FALLBACK.into())),
+        ];
+        for (cli, want) in expected {
+            let t = translate(cli, &review, "reviewer").unwrap();
+            let edit = t
+                .support
+                .iter()
+                .find(|s| s.rule == "Edit(scratch/**)")
                 .unwrap_or_else(|| panic!("{cli} lacks the Edit row"));
             assert_eq!(edit.support, want, "{cli}");
         }
