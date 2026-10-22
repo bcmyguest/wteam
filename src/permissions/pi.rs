@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use super::{Profile, RuleSupport, Support, Translation, rules_of};
 
-const FALLBACK: &str = "pi runs tools unrestricted; use a sandbox";
+pub const FALLBACK: &str = "pi runs tools unrestricted; use a sandbox";
 
 pub fn translate(profile: &Profile, role: &str) -> Result<Translation> {
     let _ = role;

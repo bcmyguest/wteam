@@ -43,6 +43,7 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `--max-turns <n>` | 200 | Orchestrator turns, handoff turns included |
 | `--dispatch <auto\|model>` | `auto` | `auto`: the watcher dispatches ready tickets and wakes the orchestrator only for blocks and human gates. `model`: the orchestrator dispatches every ticket |
 | `--budget-tokens <n>` | none | Stop new work once summed agent context tokens exceed `n` |
+| `--replan` | off | Under `auto`: each blocked ticket gets one planner turn to rewrite it and requeue it. A ticket blocked again stays blocked |
 | `--isolation <none\|worktree>` | `none` | `worktree` is not available yet |
 
 ## Team graph attributes

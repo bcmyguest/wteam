@@ -34,7 +34,7 @@ pub struct AgentDef {
 
 /// Built-in definitions: (name, model, profile), all on the `claude` CLI.
 const BUILTINS: [(&str, &str, &str); 4] = [
-    ("planner", "opus", "review"),
+    ("planner", "opus", "plan"),
     ("orchestrator", "haiku", "control"),
     ("worker", "sonnet", "edit"),
     ("reviewer", "sonnet", "review"),
@@ -112,6 +112,10 @@ mod tests {
         assert_eq!(
             load("orchestrator", &[]).unwrap().model.as_deref(),
             Some("haiku")
+        );
+        assert_eq!(
+            load("planner", &[]).unwrap().profile.as_deref(),
+            Some("plan")
         );
         assert!(load("nope", &[]).is_err());
         assert!(role_prompt("worker", &[]).unwrap().contains("worker"));

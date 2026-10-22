@@ -30,7 +30,7 @@ The run's mode is in your kickoff. Under `auto` the watcher runs `dispatch --fil
 3. End your turn. The watcher waits for work to move and resumes you with an event digest. `wteam wait` blocks past the CLI tool timeout, so leave waiting to the watcher.
 4. On each digest, a passed ticket frees its dependents: run `wteam dispatch --fill` for them. For each blocked ticket decide one of:
    - (a) `wteam requeue NN --note "<narrower instruction>"` when clarification fixes the reason.
-   - (b) leave it blocked when it needs re-planning or a human; the stop report surfaces it.
+   - (b) leave it blocked when it needs re-planning; under `--replan` the planner gets it next. Without `--replan` the stop report surfaces it for a human.
    Then end the turn.
 
 Finish each turn having acted on every event in the digest.

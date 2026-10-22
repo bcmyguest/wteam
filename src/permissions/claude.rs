@@ -72,4 +72,21 @@ mod tests {
         assert_eq!(t.args, ["--dangerously-skip-permissions"]);
         assert!(t.support.is_empty());
     }
+
+    #[test]
+    fn plan_profile_allows_only_wteam_edits() {
+        let t = translate(&builtin("plan").unwrap(), "planner").unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&t.args[1]).unwrap();
+        let allow = settings["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().any(|r| r == "Edit(.wteam/**)"));
+        assert!(!allow.iter().any(|r| r == "Edit(**)"));
+        assert!(
+            settings["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        // dontAsk denies every edit that no allow rule names.
+        assert_eq!(t.args[3], "dontAsk");
+    }
 }

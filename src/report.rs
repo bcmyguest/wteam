@@ -77,6 +77,7 @@ pub fn report_data(paths: &Paths) -> Result<Value> {
                     "title": title(id),
                     "reason": reason,
                     "action": recommended_action(&reason, paths),
+                    "replans": ts.replans,
                 }));
             }
             _ => {}
@@ -145,6 +146,9 @@ pub fn stop_report(paths: &Paths) -> Result<String> {
             s(b, "reason"),
             s(b, "action")
         ));
+        if b["replans"].as_u64().unwrap_or(0) > 0 {
+            out.push_str("  replan: re-planned once; the planner's re-plan did not unblock it\n");
+        }
     }
     out.push_str(&format!(
         "Dispatch: {}\n",

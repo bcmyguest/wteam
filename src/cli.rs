@@ -224,6 +224,9 @@ pub struct RunArgs {
     /// blocked tickets and human gates. `model`: the orchestrator dispatches every ticket.
     #[arg(long, value_enum, default_value_t = DispatchMode::Auto)]
     pub dispatch: DispatchMode,
+    /// Under `auto`: give each blocked ticket one planner turn to rewrite it, then requeue it.
+    #[arg(long)]
+    pub replan: bool,
 }
 
 /// Who dispatches ready tickets during `wteam run`.

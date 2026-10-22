@@ -84,7 +84,7 @@ pub struct Translation {
 }
 
 /// Built-in profile names, in display order.
-pub const BUILTINS: [&str; 4] = ["control", "review", "edit", "full"];
+pub const BUILTINS: [&str; 5] = ["control", "review", "edit", "plan", "full"];
 
 /// CLIs `wteam permissions` shows by default.
 pub const DEFAULT_CLIS: [&str; 5] = ["claude", "codex", "opencode", "pi", "cursor"];
@@ -129,7 +129,7 @@ fn strs(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
-/// Built-in profiles: `control`, `review`, `edit`, `full`.
+/// Built-in profiles: `control`, `review`, `edit`, `plan`, `full`.
 pub fn builtin(name: &str) -> Option<Profile> {
     let (allow, ask, deny): (&[&str], &[&str], &[&str]) = match name {
         "control" => (
@@ -215,6 +215,32 @@ pub fn builtin(name: &str) -> Option<Profile> {
             ],
             &["Bash(git push *)"],
             &["Read(**/.env)", "Bash(rm -rf *)"],
+        ),
+        "plan" => (
+            // The planner reads code, writes `.wteam/` and runs `wteam`. No interpreters or build
+            // tools: they can write anywhere. No `Edit(**)` deny either: claude and cursor resolve
+            // deny before allow, which would shadow the `.wteam` allow. Edits outside `.wteam/`
+            // are denied by default on claude (`dontAsk`) and opencode (catch-all deny). Codex
+            // maps any allowed edit to workspace-write, so it can edit the whole workspace.
+            &[
+                "Read(**)",
+                "Edit(.wteam/**)",
+                "Bash(wteam *)",
+                "Bash(git status *)",
+                "Bash(git log *)",
+                "Bash(git diff *)",
+                "Bash(ls *)",
+                "Bash(cat *)",
+                "Bash(head *)",
+                "Bash(tail *)",
+                "Bash(grep *)",
+                "Bash(rg *)",
+                "Bash(wc *)",
+                "Bash(pwd)",
+                "Bash(cd *)",
+            ],
+            &[],
+            &[],
         ),
         "full" => {
             return Some(Profile {
@@ -544,5 +570,48 @@ mod tests {
             Translation::default()
         );
         assert!(translate("bogus", &p, "worker").is_err());
+    }
+
+    #[test]
+    fn plan_profile_reads_edits_wteam_and_runs_no_writers() {
+        let plan = builtin("plan").unwrap();
+        assert!(plan.deny.is_empty() && plan.ask.is_empty());
+        assert!(plan.allow.iter().any(|a| a == "Edit(.wteam/**)"));
+        assert!(!plan.allow.iter().any(|a| a == "Edit(**)"));
+        // No interpreter or build tool: each can write outside `.wteam/`.
+        for rule in [
+            "python3 *",
+            "python *",
+            "node *",
+            "go *",
+            "cargo *",
+            "npm *",
+            "pytest *",
+            "make test",
+            "make check",
+        ] {
+            assert!(
+                !plan.allow.iter().any(|a| a == &format!("Bash({rule})")),
+                "plan allows {rule}"
+            );
+        }
+        // Claude, opencode and cursor scope edits by path exactly; codex can only switch the whole
+        // sandbox; pi enforces nothing.
+        let expected = [
+            ("claude", Support::Exact),
+            ("opencode", Support::Exact),
+            ("cursor", Support::Exact),
+            ("codex", Support::Lossy("sandbox workspace-write".into())),
+            ("pi", Support::Unsupported(pi::FALLBACK.into())),
+        ];
+        for (cli, want) in expected {
+            let t = translate(cli, &plan, "planner").unwrap();
+            let edit = t
+                .support
+                .iter()
+                .find(|s| s.rule == "Edit(.wteam/**)")
+                .unwrap_or_else(|| panic!("{cli} lacks the Edit row"));
+            assert_eq!(edit.support, want, "{cli}");
+        }
     }
 }

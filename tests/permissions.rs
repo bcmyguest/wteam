@@ -10,7 +10,7 @@ fn no_args_shows_every_builtin_across_four_clis() {
     let r = Repo::new("demo");
     let out = r.wteam().arg("permissions").assert().success();
     let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    for p in ["control", "review", "edit", "full"] {
+    for p in ["control", "review", "edit", "plan", "full"] {
         assert!(text.lines().any(|l| l == p), "missing {p}: {text}");
     }
     for c in ["claude", "codex", "opencode", "cursor"] {
@@ -52,7 +52,7 @@ fn unknown_profile_lists_builtins() {
         .args(["permissions", "--profile", "nope"])
         .assert()
         .failure()
-        .stderr(contains("control, review, edit, full"));
+        .stderr(contains("control, review, edit, plan, full"));
 }
 
 #[test]
@@ -150,4 +150,22 @@ fn edit_profile_allows_mkdir() {
         .success();
     let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(text.contains("Bash(mkdir *)"), "edit lacks mkdir: {text}");
+}
+
+#[test]
+fn plan_profile_edits_only_wteam_for_claude() {
+    let r = Repo::new("demo");
+    let out = r
+        .wteam()
+        .args(["permissions", "--profile", "plan", "--cli", "claude"])
+        .assert()
+        .success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("Edit(.wteam/**)"), "{text}");
+    assert!(
+        !text
+            .lines()
+            .any(|l| l.starts_with("deny") && l.contains("Edit(**)")),
+        "{text}"
+    );
 }

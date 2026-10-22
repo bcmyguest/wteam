@@ -24,6 +24,8 @@ use crate::worktree;
 const POLL: Duration = Duration::from_millis(200);
 /// Instance id of the orchestrator.
 const ORCHESTRATOR: &str = "orchestrator.1";
+/// Instance id of the planner that re-plans blocked tickets under `--replan`.
+const PLANNER: &str = "planner.1";
 /// Sent once per generation, when its context passes the handoff threshold.
 const HANDOFF_PROMPT: &str = "Your context is nearly full. Write your handoff baton now, with these sections: Goal, Confirmed facts, Ruled out, Next steps, Constraints, Blockers. Reply with the baton only.";
 /// Ends every kickoff and digest.
@@ -182,7 +184,75 @@ fn drive_auto(ctx: &Ctx, opts: &RunOptions) -> Result<String> {
             };
             carried = Some(next_generation(ctx, &baton)?);
         }
+        if let Some(why) = replan_blocked(ctx)? {
+            return Ok(why);
+        }
     }
+}
+
+/// `--replan`: give each blocked ticket with no re-plan spent one planner turn. The planner
+/// requeues the ticket when it can make it succeed; otherwise it stays blocked. Returns a stop
+/// reason when a planner turn fails.
+fn replan_blocked(ctx: &Ctx) -> Result<Option<String>> {
+    let s = state::load(&ctx.paths)?;
+    if !s.run.replan || over_budget(&s).is_some() {
+        return Ok(None);
+    }
+    let tickets = work::load_tickets(&ctx.paths.tickets_dir())?;
+    let due: Vec<(String, String)> = s
+        .tickets
+        .iter()
+        .filter(|(_, ts)| ts.status == TicketStatus::Blocked && ts.replans == 0)
+        .map(|(id, ts)| (id.clone(), ts.blocked_reason.clone().unwrap_or_default()))
+        .collect();
+    for (id, reason) in due {
+        let title = tickets
+            .iter()
+            .find(|t| t.id == id)
+            .map_or_else(String::new, |t| t.title.clone());
+        // The budget is spent before the turn, so a failed planner is never retried.
+        state::with_state(&ctx.paths, |s| {
+            s.ticket_mut(&id).replans += 1;
+            Ok(())
+        })?;
+        let prompt = replan_prompt(&ctx.paths.slug, &id, &title, &reason);
+        if let Err(e) = planner_turn(ctx, &prompt) {
+            return Ok(Some(format!("re-plan of {id} failed: {e:#}")));
+        }
+    }
+    Ok(None)
+}
+
+/// The planner's prompt for one blocked ticket. Its role prompt rides on the first turn only.
+fn replan_prompt(slug: &str, id: &str, title: &str, reason: &str) -> String {
+    format!(
+        "Re-plan blocked ticket {id} ({title}). Reason: {reason}. Read the ticket, its branch's preserved work (`git log wteam/{slug}/{id}`), `queue.md`, and the current code. Rewrite `tickets/{id}-*.md` so it can succeed (narrower scope, corrected Files, notes on preserved work), optionally split it by adding new ticket files; then run `wteam pickup --slug {slug}` until it lists no problems, then `wteam requeue {id}`."
+    )
+}
+
+/// One planner turn in the main repo root, marked busy for its duration like the orchestrator.
+fn planner_turn(ctx: &Ctx, prompt: &str) -> Result<String> {
+    if !resume::begin_foreground(&ctx.paths, PLANNER)? {
+        bail!("planner is already busy");
+    }
+    let result = run_planner_turn(ctx, prompt);
+    resume::end_foreground(&ctx.paths, PLANNER)?;
+    result
+}
+
+fn run_planner_turn(ctx: &Ctx, prompt: &str) -> Result<String> {
+    let s = state::load(&ctx.paths)?;
+    let st = s.agents.get(PLANNER).cloned().unwrap_or_default();
+    let first = st.session_id.is_none();
+    resume::one_turn(
+        ctx,
+        PLANNER,
+        first,
+        st.session_id,
+        st.turns + 1,
+        prompt,
+        true,
+    )
 }
 
 /// True when the orchestrator has no session yet: its next turn is the first of a generation.

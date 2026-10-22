@@ -68,6 +68,9 @@ pub struct TicketState {
     /// Orchestrator note from `wteam requeue`, shown in the next dispatch brief.
     #[serde(default)]
     pub note: Option<String>,
+    /// Planner re-plans spent on this ticket under `wteam run --replan` (budget: 1).
+    #[serde(default)]
+    pub replans: u32,
     /// Changed paths outside `Files:` the worker declared at submit. Committed on PASS.
     /// Replaced by each submit, cleared on dispatch.
     #[serde(default)]
@@ -182,6 +185,9 @@ pub struct RunSettings {
     /// whose runs were orchestrator-driven, so it reads as `model`.
     #[serde(default = "model_dispatch")]
     pub dispatch: String,
+    /// `wteam run --replan`: under `auto`, the planner rewrites each blocked ticket once.
+    #[serde(default)]
+    pub replan: bool,
 }
 
 fn model_dispatch() -> String {
@@ -199,6 +205,7 @@ impl Default for RunSettings {
             active: false,
             watcher_pid: None,
             dispatch: model_dispatch(),
+            replan: false,
         }
     }
 }

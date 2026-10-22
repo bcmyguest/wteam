@@ -42,6 +42,7 @@ pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
             active: true,
             watcher_pid: Some(std::process::id()),
             dispatch: a.dispatch.name().to_string(),
+            replan: a.replan,
         };
         Ok(())
     })?;

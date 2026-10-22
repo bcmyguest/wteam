@@ -734,3 +734,98 @@ fn auto_with_every_ticket_blocked_stops_with_a_report() {
     assert_eq!(status_of(&r, "02"), "blocked", "{text}");
     assert!(prompts(&r) <= 2, "{text}");
 }
+
+/// One ticket, `01`, on `src/01.txt`.
+fn one_ticket() -> Repo {
+    let r = Repo::new("demo");
+    r.ticket("01", "Ticket one", "None", "src/01.txt", "");
+    r.use_fake_agents();
+    r.agent_script("orchestrator", "exit 0\n");
+    r.agent_script("reviewer", REVIEWER);
+    r
+}
+
+/// Worker: block `01` until the planner has run, then submit it.
+const BLOCK_UNTIL_REPLANNED: &str = r#"T=$(wteam status | awk -v a="$WTEAM_AGENT" '$NF==a && $0 ~ /\[doing\]/ {print $1; exit}')
+if [ ! -f "$WTEAM_FAKE_DIR/replanned" ]; then
+  wteam block "$T" --reason "needs spec" || exit 1
+  exit 0
+fi
+mkdir -p src
+echo edit >> "src/$T.txt"
+wteam submit "$T" --summary "did $T" || exit 1
+"#;
+
+/// Planner: log the call, mark it done, requeue `01`.
+const PLANNER: &str = r#"echo call >> "$WTEAM_FAKE_DIR/planner-calls"
+echo done > "$WTEAM_FAKE_DIR/replanned"
+wteam requeue 01 --note "narrowed scope" || exit 1
+"#;
+
+/// Worker that blocks every time.
+const ALWAYS_BLOCK: &str = r#"T=$(wteam status | awk -v a="$WTEAM_AGENT" '$NF==a && $0 ~ /\[doing\]/ {print $1; exit}')
+wteam block "$T" --reason "needs spec" || exit 1
+"#;
+
+fn planner_calls(r: &Repo) -> usize {
+    r.read(".wteam-fake/planner-calls").lines().count()
+}
+
+#[test]
+fn replan_rewrites_blocked_ticket_and_lands_it() {
+    let r = one_ticket();
+    r.agent_script("worker", BLOCK_UNTIL_REPLANNED);
+    r.agent_script("planner", PLANNER);
+
+    let text = run_ok(&r, &["--dispatch", "auto", "--replan"]);
+
+    assert_eq!(r.state()["run"]["replan"], true);
+    assert_eq!(planner_calls(&r), 1, "{text}");
+    assert_eq!(status_of(&r, "01"), "done", "{text}");
+    assert!(
+        text.contains("Run stopped: no ticket is runnable or in progress"),
+        "{text}"
+    );
+}
+
+#[test]
+fn without_replan_blocked_ticket_stops_the_run() {
+    let r = one_ticket();
+    r.agent_script("worker", BLOCK_UNTIL_REPLANNED);
+    r.agent_script("planner", PLANNER);
+
+    let text = run_ok(&r, &["--dispatch", "auto"]);
+
+    assert_eq!(r.state()["run"]["replan"], false);
+    assert_eq!(status_of(&r, "01"), "blocked", "{text}");
+    assert_eq!(planner_calls(&r), 0, "planner ran without --replan");
+}
+
+#[test]
+fn ticket_blocked_again_after_replan_stays_blocked() {
+    let r = one_ticket();
+    r.agent_script("worker", ALWAYS_BLOCK);
+    r.agent_script("planner", PLANNER);
+
+    let text = run_ok(&r, &["--dispatch", "auto", "--replan"]);
+
+    assert_eq!(planner_calls(&r), 1, "planner must run once per ticket");
+    assert_eq!(status_of(&r, "01"), "blocked", "{text}");
+    assert!(text.contains("re-planned once"), "{text}");
+}
+
+#[test]
+fn wteam_dir_writes_do_not_dirty_pickup() {
+    // No fake agents: their scripts sit untracked in the repo root and would be flagged.
+    let r = Repo::new("demo");
+    r.ticket("01", "Ticket one", "None", "src/01.txt", "");
+    r.write(".wteam/demo/notes.md", "planner scratch\n");
+    let out = r.wteam().arg("pickup").assert();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(!text.contains("git tree is dirty"), "{text}");
+
+    r.write("stray.txt", "outside .wteam\n");
+    let out = r.wteam().arg("pickup").assert();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).to_string();
+    assert!(text.contains("git tree is dirty: stray.txt"), "{text}");
+}

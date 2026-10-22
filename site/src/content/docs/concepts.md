@@ -82,6 +82,10 @@ and the next generation starts with that file as its brief.
 `wteam run --dispatch auto` (the default) fills idle pairs with the watcher itself, so
 dispatch costs no model turn. The orchestrator wakes only when a ticket blocks or a human
 gate needs approval. `--dispatch model` keeps the orchestrator dispatching every ticket.
+
+`--replan` (off by default) gives each blocked ticket one planner turn under `auto`. The planner
+runs in the repo root with the `plan` profile, rewrites the ticket, and requeues it. A ticket
+blocked again after its re-plan stays blocked, and the stop report says it was re-planned once.
 The stop report and `--json` record the mode.
 
 ## Self-healing

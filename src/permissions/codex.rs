@@ -219,4 +219,19 @@ prefix_rule(pattern=["rm", "-rf"], decision="forbidden")
         assert_eq!(t.args, ["--dangerously-bypass-approvals-and-sandbox"]);
         assert!(t.files.is_empty());
     }
+
+    #[test]
+    fn plan_profile_edits_are_lossy() {
+        let t = translate(&builtin("plan").unwrap(), "planner").unwrap();
+        let edit = t
+            .support
+            .iter()
+            .find(|s| s.rule == "Edit(.wteam/**)")
+            .unwrap();
+        assert_eq!(
+            edit.support,
+            Support::Lossy("sandbox workspace-write".into())
+        );
+        assert_eq!(t.args, ["-c", r#"sandbox_mode="workspace-write""#]);
+    }
 }

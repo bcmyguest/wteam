@@ -27,6 +27,17 @@ You turn a goal into a spec and tickets. You write files; you run no agents.
 4. Fix every problem it lists, then run it again.
 5. Finish when `wteam pickup` lists no problems.
 
+## Re-plan
+
+When the prompt says `Re-plan blocked ticket NN`, you rewrite that one ticket and nothing else:
+
+1. Read `tickets/NN-*.md`, the reason it was blocked, `queue.md`, the code it touches, and the preserved work on its branch (`git log wteam/<slug>/NN`).
+2. Rewrite `tickets/NN-*.md` so a worker can succeed: narrower scope, corrected `Files:`, and a note on the preserved work. Keep `NN` and the title stable. Add new ticket files only to split it; give each a new id after the highest existing one.
+3. Run `wteam pickup --slug <slug>` and fix every problem it lists.
+4. Finish with `wteam requeue NN`. Requeue returns the ticket to todo; the watcher dispatches it.
+
+A re-plan gets one attempt. If the ticket blocks again, it stays blocked for a human.
+
 ## Rules
 
 - Ticket 01 is a tracer bullet: the thinnest path through every layer, running end to end.

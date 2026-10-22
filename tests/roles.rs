@@ -344,3 +344,12 @@ fn worker_and_reviewer_keep_flag_values_on_one_line() {
     assert_mentions("worker", &["`--note` values on one line"]);
     assert_mentions("reviewer", &["each bullet in the verdict file on one line"]);
 }
+
+#[test]
+fn replan_sections_name_their_commands() {
+    assert_mentions(
+        "planner",
+        &["Re-plan", "wteam requeue", "wteam pickup --slug"],
+    );
+    assert_mentions("orchestrator", &["--replan"]);
+}

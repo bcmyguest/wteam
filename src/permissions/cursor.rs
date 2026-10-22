@@ -150,4 +150,13 @@ mod tests {
         assert_eq!(t.args, ["--force"]);
         assert!(t.files.is_empty());
     }
+
+    #[test]
+    fn plan_profile_writes_only_wteam() {
+        let t = translate(&builtin("plan").unwrap(), "planner").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&t.files[0].1).unwrap();
+        let allow = v["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().any(|r| r == "Write(.wteam/**)"));
+        assert!(!allow.iter().any(|r| r == "Write(**)"));
+    }
 }

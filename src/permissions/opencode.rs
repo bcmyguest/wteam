@@ -203,4 +203,12 @@ mod tests {
         let t = translate(&p, "w").unwrap();
         assert!(matches!(t.support[0].support, Support::Unsupported(_)));
     }
+
+    #[test]
+    fn plan_profile_edits_only_wteam() {
+        let t = translate(&builtin("plan").unwrap(), "planner").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&t.env[0].1).unwrap();
+        assert_eq!(v["edit"]["*"], "deny");
+        assert_eq!(v["edit"][".wteam/**"], "allow");
+    }
 }
