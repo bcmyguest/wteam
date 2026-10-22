@@ -133,8 +133,11 @@ fn dispatch_role(ctx: &Ctx) -> String {
 }
 
 /// The worker brief: ticket, round, earlier findings and notes, and how to report back.
-fn brief(t: &Ticket, round: u32, last: Option<&Verdict>) -> String {
+fn brief(t: &Ticket, round: u32, last: Option<&Verdict>, note: Option<&str>) -> String {
     let mut b = format!("Ticket {} (round {round})\n\n{}\n", t.id, t.body.trim());
+    if let Some(n) = note {
+        b.push_str(&format!("\nOrchestrator note:\n{}\n", n.trim()));
+    }
     if let Some(v) = last {
         if !v.findings.is_empty() {
             b.push_str("\nPrevious findings to resolve:\n");
@@ -216,7 +219,7 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
     let all = work::load_tickets(&ctx.paths.tickets_dir())?;
     let role = dispatch_role(ctx);
     let pairs = ctx.team.count(&role);
-    let (agent, round, last) = crate::state::with_state(&ctx.paths, |s| {
+    let (agent, round, last, note) = crate::state::with_state(&ctx.paths, |s| {
         if !work::ready(&all, s).iter().any(|r| r.id == t.id) {
             bail!(
                 "ticket {} is not ready (it must be todo with every blocker done)",
@@ -258,14 +261,19 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         ts.assignee = Some(agent.clone());
         ts.pair = Some(n);
         ts.blocked_reason = None;
-        Ok((agent, ts.rounds + 1, ts.last_verdict.clone()))
+        Ok((
+            agent,
+            ts.rounds + 1,
+            ts.last_verdict.clone(),
+            ts.note.clone(),
+        ))
     })?;
     mail_and_deliver(
         ctx,
         &agent,
         "orchestrator",
         &t.id,
-        &brief(&t, round, last.as_ref()),
+        &brief(&t, round, last.as_ref(), note.as_deref()),
     )?;
     Ok(agent)
 }

@@ -73,6 +73,7 @@ pub fn run(g: &Global, cmd: &Command) -> Result<Out> {
         Command::Submit(a) => tickets::submit(g, a),
         Command::Verdict(a) => tickets::verdict(g, a),
         Command::Block(a) => tickets::block(g, a),
+        Command::Requeue(a) => tickets::requeue(g, a),
         Command::Approve(a) => tickets::approve(g, a),
         Command::Send(a) => mail::send(g, a),
         Command::Inbox(a) => mail::inbox(g, a),

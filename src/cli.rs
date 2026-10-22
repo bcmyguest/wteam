@@ -54,6 +54,8 @@ pub enum Command {
     Verdict(VerdictArgs),
     /// Mark a ticket blocked.
     Block(BlockArgs),
+    /// Return a blocked ticket to todo with an optional note (orchestrator).
+    Requeue(RequeueArgs),
     /// Pass a human gate.
     Approve(TicketArg),
     /// Message another agent instance.
@@ -137,6 +139,14 @@ pub struct BlockArgs {
     pub ticket: String,
     #[arg(long)]
     pub reason: String,
+}
+
+#[derive(Debug, Args)]
+pub struct RequeueArgs {
+    pub ticket: String,
+    /// Guidance included in the next dispatch brief.
+    #[arg(long)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -1,14 +1,14 @@
 //! Ticket lifecycle: dispatch, submit, verdict, block, approve.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde_json::json;
 
 use super::Out;
 use crate::cli::{
-    BlockArgs, DispatchArgs, Global, SubmitArgs, TicketArg, VerdictArgs, VerdictValue,
+    BlockArgs, DispatchArgs, Global, RequeueArgs, SubmitArgs, TicketArg, VerdictArgs, VerdictValue,
 };
 use crate::engine::{self, Ctx};
-use crate::state::{Verdict, VerdictKind};
+use crate::state::{TicketStatus, Verdict, VerdictKind};
 
 pub fn dispatch(g: &Global, a: &DispatchArgs) -> Result<Out> {
     let ctx = Ctx::load(super::effort(g)?)?;
@@ -68,6 +68,36 @@ pub fn block(g: &Global, a: &BlockArgs) -> Result<Out> {
         format!("blocked {}", a.ticket),
         json!({ "ticket": a.ticket, "reason": a.reason }),
     ))
+}
+
+/// Move a blocked ticket back to todo: reset rounds and holder, store the note.
+pub fn requeue(g: &Global, a: &RequeueArgs) -> Result<Out> {
+    let paths = super::effort(g)?;
+    let ticket = crate::work::load_tickets(&paths.tickets_dir())?
+        .into_iter()
+        .find(|t| t.id == a.ticket)
+        .with_context(|| format!("no ticket `{}`", a.ticket))?
+        .id;
+    let state = crate::state::with_state(&paths, |s| {
+        let ts = s.ticket_mut(&ticket);
+        if ts.status != TicketStatus::Blocked {
+            let status = serde_json::to_value(ts.status)?;
+            bail!(
+                "ticket {ticket} is {}; only blocked tickets can be requeued",
+                status.as_str().unwrap_or("not blocked")
+            );
+        }
+        ts.status = TicketStatus::Todo;
+        ts.rounds = 0;
+        ts.assignee = None;
+        ts.pair = None;
+        ts.blocked_reason = None;
+        ts.note = a.note.clone();
+        Ok(ts.clone())
+    })?;
+    let mut value = serde_json::to_value(&state)?;
+    value["ticket"] = json!(ticket);
+    Ok(Out::new(format!("requeued {ticket}"), value))
 }
 
 pub fn approve(g: &Global, a: &TicketArg) -> Result<Out> {

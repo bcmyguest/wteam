@@ -62,6 +62,9 @@ pub struct TicketState {
     pub blocked_reason: Option<String>,
     #[serde(default)]
     pub last_verdict: Option<Verdict>,
+    /// Orchestrator note from `wteam requeue`, shown in the next dispatch brief.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
