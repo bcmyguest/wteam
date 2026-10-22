@@ -1,10 +1,171 @@
-//! Translate a profile for codex.
+//! Translate a profile for codex: execpolicy `prefix_rule`s plus a sandbox level.
 
-use anyhow::{Result, bail};
+use std::path::PathBuf;
 
-use super::{Profile, Translation};
+use anyhow::Result;
+
+use super::{Decision, Profile, Rule, RuleSupport, Support, Translation, rules_of, tool_pattern};
+
+/// `(prefix tokens, exact)` for a Bash pattern: tokens before the first one holding `*`.
+/// A lone trailing `*` is exact because a prefix rule already matches any arguments.
+fn prefix(pattern: &str) -> (Vec<String>, bool) {
+    let mut tokens = Vec::new();
+    let all: Vec<&str> = pattern.split_whitespace().collect();
+    for (i, t) in all.iter().enumerate() {
+        if t.contains('*') {
+            let exact = *t == "*" && i + 1 == all.len();
+            return (tokens, exact);
+        }
+        tokens.push(t.to_string());
+    }
+    (tokens, true)
+}
+
+fn quote(s: &str) -> String {
+    serde_json::Value::String(s.to_string()).to_string()
+}
 
 pub fn translate(profile: &Profile, role: &str) -> Result<Translation> {
-    let _ = (profile, role);
-    bail!("not implemented: permissions::codex::translate")
+    let rules = rules_of(profile)?;
+    let mut lines = Vec::new();
+    let mut support = Vec::new();
+    let edit_allowed = rules
+        .iter()
+        .any(|(d, _, r)| *d == Decision::Allow && matches!(tool_pattern(r), Some(("Edit", _))));
+    let level = if edit_allowed {
+        "workspace-write"
+    } else {
+        "read-only"
+    };
+    for (d, rendered, rule) in &rules {
+        let sup = match (rule, tool_pattern(rule)) {
+            (_, Some(("Bash", pat))) => {
+                let (tokens, exact) = prefix(&pat);
+                if tokens.is_empty() {
+                    Support::Unsupported(format!("no literal prefix; `{rendered}` not written"))
+                } else {
+                    let decision = match d {
+                        Decision::Allow => "allow",
+                        Decision::Ask => "prompt",
+                        Decision::Deny => "forbidden",
+                    };
+                    let pattern: Vec<String> = tokens.iter().map(|t| quote(t)).collect();
+                    lines.push(format!(
+                        "prefix_rule(pattern=[{}], decision={})",
+                        pattern.join(", "),
+                        quote(decision)
+                    ));
+                    if exact {
+                        Support::Exact
+                    } else {
+                        Support::Lossy(format!("prefix `{}`", tokens.join(" ")))
+                    }
+                }
+            }
+            (_, Some(("Read" | "Edit", _))) => Support::Lossy(format!("sandbox {level}")),
+            (Rule::WebFetch(_), _) | (_, Some(("WebFetch", _))) => {
+                Support::Unsupported("not enforced; sandbox network setting applies".into())
+            }
+            _ => Support::Unsupported("tool has no codex equivalent; ignored".into()),
+        };
+        support.push(RuleSupport {
+            decision: *d,
+            rule: rendered.clone(),
+            support: sup,
+        });
+    }
+    if profile.bypass {
+        return Ok(Translation {
+            args: vec!["--dangerously-bypass-approvals-and-sandbox".into()],
+            support,
+            ..Translation::default()
+        });
+    }
+    let mut files = Vec::new();
+    if !lines.is_empty() {
+        let mut text = lines.join("\n");
+        text.push('\n');
+        files.push((
+            PathBuf::from(format!(".codex/rules/wteam-{role}.rules")),
+            text,
+        ));
+    }
+    Ok(Translation {
+        args: vec!["-s".into(), level.into()],
+        files,
+        support,
+        ..Translation::default()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::permissions::builtin;
+
+    #[test]
+    fn edit_profile_golden() {
+        let t = translate(&builtin("edit").unwrap(), "worker").unwrap();
+        assert_eq!(t.args, ["-s", "workspace-write"]);
+        assert_eq!(t.files.len(), 1);
+        assert_eq!(
+            t.files[0].0,
+            PathBuf::from(".codex/rules/wteam-worker.rules")
+        );
+        assert_eq!(
+            t.files[0].1,
+            r#"prefix_rule(pattern=["wteam"], decision="allow")
+prefix_rule(pattern=["git", "diff"], decision="allow")
+prefix_rule(pattern=["git", "status"], decision="allow")
+prefix_rule(pattern=["cargo"], decision="allow")
+prefix_rule(pattern=["npm"], decision="allow")
+prefix_rule(pattern=["pytest"], decision="allow")
+prefix_rule(pattern=["git", "push"], decision="prompt")
+prefix_rule(pattern=["rm", "-rf"], decision="forbidden")
+"#
+        );
+        assert_eq!(t.support.len(), 11);
+        assert_eq!(
+            t.support[0].support,
+            Support::Lossy("sandbox workspace-write".into())
+        );
+        assert_eq!(t.support[2].support, Support::Exact);
+    }
+
+    #[test]
+    fn read_only_without_edit_allow() {
+        let t = translate(&builtin("review").unwrap(), "reviewer").unwrap();
+        assert_eq!(t.args, ["-s", "read-only"]);
+    }
+
+    #[test]
+    fn glob_after_prefix_is_lossy() {
+        let p = Profile {
+            name: "x".into(),
+            allow: vec![
+                "Bash(cargo * --release)".into(),
+                "Bash(*)".into(),
+                "WebFetch(domain:x.com)".into(),
+            ],
+            ..Profile::default()
+        };
+        let t = translate(&p, "w").unwrap();
+        assert_eq!(
+            t.files[0].1,
+            "prefix_rule(pattern=[\"cargo\"], decision=\"allow\")\n"
+        );
+        assert_eq!(
+            t.support[0].support,
+            Support::Lossy("prefix `cargo`".into())
+        );
+        assert!(matches!(t.support[1].support, Support::Unsupported(_)));
+        assert!(matches!(t.support[2].support, Support::Unsupported(_)));
+    }
+
+    #[test]
+    fn bypass_golden() {
+        let t = translate(&builtin("full").unwrap(), "worker").unwrap();
+        assert_eq!(t.args, ["--dangerously-bypass-approvals-and-sandbox"]);
+        assert!(t.files.is_empty());
+    }
 }

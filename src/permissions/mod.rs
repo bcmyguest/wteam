@@ -20,7 +20,7 @@ pub mod opencode;
 
 use std::path::PathBuf;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 /// One rule. `Tool` is a bare tool name (e.g. `Read`) matching every use.
@@ -82,10 +82,35 @@ pub struct Translation {
     pub support: Vec<RuleSupport>,
 }
 
+/// Built-in profile names, in display order.
+pub const BUILTINS: [&str; 4] = ["control", "review", "edit", "full"];
+
+/// CLIs `wteam permissions` shows by default.
+pub const DEFAULT_CLIS: [&str; 4] = ["claude", "codex", "opencode", "cursor"];
+
 /// Parse `Bash(git commit *)`, `Read(src/**)`, `Edit(x)`, `WebFetch(domain:x)` or a bare tool name.
 pub fn parse_rule(s: &str) -> Result<Rule> {
-    let _ = s;
-    bail!("not implemented: permissions::parse_rule")
+    let s = s.trim();
+    let Some(open) = s.find('(') else {
+        if s.is_empty() || s.contains(')') {
+            bail!("malformed rule `{s}`");
+        }
+        return Ok(Rule::Tool(s.to_string()));
+    };
+    let Some(arg) = s[open + 1..].strip_suffix(')') else {
+        bail!("malformed rule `{s}`: unbalanced parentheses");
+    };
+    if arg.contains(['(', ')']) && (arg.matches('(').count() != arg.matches(')').count()) {
+        bail!("malformed rule `{s}`: unbalanced parentheses");
+    }
+    let arg = arg.to_string();
+    match &s[..open] {
+        "Bash" => Ok(Rule::Bash(arg)),
+        "Read" => Ok(Rule::Read(arg)),
+        "Edit" => Ok(Rule::Edit(arg)),
+        "WebFetch" => Ok(Rule::WebFetch(arg)),
+        other => bail!("malformed rule `{s}`: unknown tool `{other}` takes no arguments"),
+    }
 }
 
 /// Render a rule back to Claude syntax.
@@ -99,26 +124,311 @@ pub fn render_rule(r: &Rule) -> String {
     }
 }
 
+fn strs(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
 /// Built-in profiles: `control`, `review`, `edit`, `full`.
 pub fn builtin(name: &str) -> Option<Profile> {
-    let _ = name;
-    None
+    let (allow, ask, deny): (&[&str], &[&str], &[&str]) = match name {
+        "control" => (
+            &[
+                "Bash(wteam *)",
+                "Bash(git status *)",
+                "Bash(git log *)",
+                "Bash(git diff *)",
+                "Read(**)",
+            ],
+            &[],
+            &["Edit(**)"],
+        ),
+        "review" => (
+            &[
+                "Read(**)",
+                "Bash(wteam *)",
+                "Bash(git diff *)",
+                "Bash(git log *)",
+                "Bash(cargo test *)",
+                "Bash(npm test *)",
+                "Bash(pytest *)",
+            ],
+            &[],
+            &["Edit(**)"],
+        ),
+        "edit" => (
+            &[
+                "Read(**)",
+                "Edit(**)",
+                "Bash(wteam *)",
+                "Bash(git diff *)",
+                "Bash(git status *)",
+                "Bash(cargo *)",
+                "Bash(npm *)",
+                "Bash(pytest *)",
+            ],
+            &["Bash(git push *)"],
+            &["Read(**/.env)", "Bash(rm -rf *)"],
+        ),
+        "full" => {
+            return Some(Profile {
+                name: name.into(),
+                bypass: true,
+                ..Profile::default()
+            });
+        }
+        _ => return None,
+    };
+    Some(Profile {
+        name: name.into(),
+        allow: strs(allow),
+        ask: strs(ask),
+        deny: strs(deny),
+        bypass: false,
+    })
 }
 
 /// Find profile `name` in `search` dirs (`<name>.toml`), else the built-ins.
 pub fn load(name: &str, search: &[PathBuf]) -> Result<Profile> {
-    let _ = (name, search);
-    bail!("not implemented: permissions::load")
+    if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+        bail!("invalid profile name `{name}`");
+    }
+    for dir in search {
+        let file = dir.join(format!("{name}.toml"));
+        if !file.is_file() {
+            continue;
+        }
+        let text = std::fs::read_to_string(&file)
+            .with_context(|| format!("reading {}", file.display()))?;
+        let mut table: toml::Table =
+            toml::from_str(&text).with_context(|| format!("parsing {}", file.display()))?;
+        table
+            .entry("name")
+            .or_insert_with(|| toml::Value::String(name.to_string()));
+        let profile: Profile = table
+            .try_into()
+            .with_context(|| format!("parsing {}", file.display()))?;
+        rules_of(&profile).with_context(|| format!("in {}", file.display()))?;
+        return Ok(profile);
+    }
+    builtin(name).with_context(|| {
+        format!(
+            "unknown profile `{name}`; built-ins: {}",
+            BUILTINS.join(", ")
+        )
+    })
+}
+
+/// Every rule of `p` parsed, in order allow, ask, deny.
+pub fn rules_of(p: &Profile) -> Result<Vec<(Decision, String, Rule)>> {
+    let groups = [
+        (Decision::Allow, &p.allow),
+        (Decision::Ask, &p.ask),
+        (Decision::Deny, &p.deny),
+    ];
+    let mut out = Vec::new();
+    for (d, list) in groups {
+        for raw in list {
+            let rule = parse_rule(raw)?;
+            out.push((d, render_rule(&rule), rule));
+        }
+    }
+    Ok(out)
+}
+
+/// A rule as `(tool, pattern)`; bare tools match everything. `None` for unknown bare tools.
+pub(crate) fn tool_pattern(r: &Rule) -> Option<(&'static str, String)> {
+    match r {
+        Rule::Bash(p) => Some(("Bash", p.clone())),
+        Rule::Read(p) => Some(("Read", p.clone())),
+        Rule::Edit(p) => Some(("Edit", p.clone())),
+        Rule::WebFetch(p) => Some(("WebFetch", p.clone())),
+        Rule::Tool(t) => match t.as_str() {
+            "Bash" => Some(("Bash", "*".into())),
+            "Read" => Some(("Read", "**".into())),
+            "Edit" => Some(("Edit", "**".into())),
+            "WebFetch" => Some(("WebFetch", "*".into())),
+            _ => None,
+        },
+    }
 }
 
 /// Translate `profile` for `cli` (`claude|codex|opencode|cursor|fake`). `role` names generated files.
 pub fn translate(cli: &str, profile: &Profile, role: &str) -> Result<Translation> {
-    let _ = (cli, profile, role);
-    bail!("not implemented: permissions::translate")
+    match cli {
+        "claude" => claude::translate(profile, role),
+        "codex" => codex::translate(profile, role),
+        "opencode" => opencode::translate(profile, role),
+        "cursor" => cursor::translate(profile, role),
+        "fake" => Ok(Translation::default()),
+        other => bail!("unknown cli `{other}`; expected claude, codex, opencode, cursor or fake"),
+    }
+}
+
+/// Per-CLI support for every rule of `profile`: one `RuleSupport` per rule.
+pub fn support_matrix(profile: &Profile, clis: &[&str]) -> Result<Vec<(String, Vec<RuleSupport>)>> {
+    clis.iter()
+        .map(|cli| {
+            let t = translate(cli, profile, &profile.name)?;
+            Ok((cli.to_string(), t.support))
+        })
+        .collect()
+}
+
+fn cell(s: &Support) -> String {
+    match s {
+        Support::Exact => "✔".into(),
+        Support::Lossy(what) => format!("≈ {what}"),
+        Support::Unsupported(fallback) => format!("✘ {fallback}"),
+    }
 }
 
 /// The ✔/≈/✘ table: one row per rule, one column per CLI.
 pub fn support_table(profile: &Profile, clis: &[&str]) -> Result<String> {
-    let _ = (profile, clis);
-    bail!("not implemented: permissions::support_table")
+    let matrix = support_matrix(profile, clis)?;
+    let rules = rules_of(profile)?;
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut header = vec!["decision".to_string(), "rule".to_string()];
+    header.extend(clis.iter().map(|c| c.to_string()));
+    rows.push(header);
+    if profile.bypass {
+        let mut row = vec!["bypass".to_string(), "(all permissions)".to_string()];
+        row.extend(clis.iter().map(|_| "✔".to_string()));
+        rows.push(row);
+    }
+    for (i, (d, rendered, _)) in rules.iter().enumerate() {
+        let mut row = vec![format!("{d:?}").to_lowercase(), rendered.clone()];
+        for (_, support) in &matrix {
+            row.push(
+                support
+                    .get(i)
+                    .map(|r| cell(&r.support))
+                    .unwrap_or_else(|| "✔".into()),
+            );
+        }
+        rows.push(row);
+    }
+    let cols = rows[0].len();
+    let widths: Vec<usize> = (0..cols)
+        .map(|c| rows.iter().map(|r| r[c].chars().count()).max().unwrap_or(0))
+        .collect();
+    let mut out = String::new();
+    for row in &rows {
+        let line: Vec<String> = row
+            .iter()
+            .zip(&widths)
+            .map(|(v, w)| format!("{v}{}", " ".repeat(w - v.chars().count())))
+            .collect();
+        out.push_str(line.join("  ").trim_end());
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rules_round_trip() {
+        for s in [
+            "Bash(git commit *)",
+            "Read(src/**)",
+            "Edit(x)",
+            "WebFetch(domain:example.com)",
+            "Glob",
+            "Bash(echo (hi))",
+        ] {
+            assert_eq!(render_rule(&parse_rule(s).unwrap()), s);
+        }
+        assert_eq!(parse_rule("Read").unwrap(), Rule::Tool("Read".into()));
+    }
+
+    #[test]
+    fn malformed_rules_error() {
+        for s in [
+            "Bash(git",
+            "Bash)",
+            "Bash(a))",
+            "Bash(a(b)",
+            "Glob(x)",
+            "",
+            "(x)",
+        ] {
+            assert!(parse_rule(s).is_err(), "{s} should fail");
+        }
+    }
+
+    #[test]
+    fn builtins_match_contract() {
+        let edit = builtin("edit").unwrap();
+        assert_eq!(edit.ask, ["Bash(git push *)"]);
+        assert_eq!(edit.deny, ["Read(**/.env)", "Bash(rm -rf *)"]);
+        assert!(builtin("full").unwrap().bypass);
+        assert!(builtin("nope").is_none());
+        for n in BUILTINS {
+            let p = builtin(n).unwrap();
+            assert!(rules_of(&p).is_ok());
+        }
+    }
+
+    #[test]
+    fn load_prefers_search_dirs_over_builtins() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("edit.toml"),
+            "name = \"edit\"\nallow = [\"Read(**)\"]\n",
+        )
+        .unwrap();
+        let p = load("edit", &[tmp.path().to_path_buf()]).unwrap();
+        assert_eq!(p.allow, ["Read(**)"]);
+        assert!(p.deny.is_empty());
+        let builtin_edit = load("edit", &[]).unwrap();
+        assert_eq!(builtin_edit.ask, ["Bash(git push *)"]);
+    }
+
+    #[test]
+    fn load_unknown_lists_builtins() {
+        let err = load("nope", &[]).unwrap_err().to_string();
+        assert!(err.contains("nope"), "{err}");
+        for n in BUILTINS {
+            assert!(err.contains(n), "{err}");
+        }
+    }
+
+    #[test]
+    fn load_rejects_malformed_rules() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("bad.toml"), "allow = [\"Bash(oops\"]\n").unwrap();
+        assert!(load("bad", &[tmp.path().to_path_buf()]).is_err());
+    }
+
+    #[test]
+    fn table_has_column_per_cli_and_symbols() {
+        let p = Profile {
+            name: "t".into(),
+            allow: vec!["Bash(git diff *)".into(), "Edit(src/**)".into()],
+            ask: vec!["Bash(git push *)".into()],
+            deny: vec!["WebFetch(domain:x.com)".into()],
+            bypass: false,
+        };
+        let t = support_table(&p, &["claude", "codex", "cursor"]).unwrap();
+        let header = t.lines().next().unwrap();
+        for c in ["claude", "codex", "cursor"] {
+            assert!(header.contains(c), "{t}");
+        }
+        assert!(t.contains('✔'), "{t}");
+        assert!(t.contains("≈ deny"), "{t}");
+        assert!(t.contains("✘ "), "{t}");
+        assert_eq!(t.lines().count(), 5, "{t}");
+    }
+
+    #[test]
+    fn fake_translation_is_empty() {
+        let p = builtin("edit").unwrap();
+        assert_eq!(
+            translate("fake", &p, "worker").unwrap(),
+            Translation::default()
+        );
+        assert!(translate("bogus", &p, "worker").is_err());
+    }
 }
