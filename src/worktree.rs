@@ -130,8 +130,11 @@ pub fn preserve(paths: &Paths, pair: u32, ticket: &str, title: &str) -> Result<b
 }
 
 /// Create (or reuse) pair `pair`'s worktree on branch `wteam/<slug>/<ticket>`.
-/// A new branch starts at the main tree's HEAD. A worktree that still holds another
-/// ticket's uncommitted work is refused; a clean one is removed first.
+/// A new branch starts at the main tree's HEAD. An existing branch (preserved work) is
+/// rebased onto main's HEAD first, so it sees work landed since it forked; a rebase that
+/// conflicts, or a worktree with uncommitted changes, keeps the branch as it was.
+/// A worktree that still holds another ticket's uncommitted work is refused; a clean one is
+/// removed first.
 pub fn prepare(paths: &Paths, pair: u32, ticket: &str) -> Result<PathBuf> {
     let _lock = lock(paths)?;
     let root = &paths.root;
@@ -141,6 +144,7 @@ pub fn prepare(paths: &Paths, pair: u32, ticket: &str) -> Result<PathBuf> {
     if dir.exists() {
         let current = git(&dir, &["branch", "--show-current"])?.trim().to_string();
         if current == branch {
+            catch_up(paths, pair, &dir);
             return Ok(dir);
         }
         if dirty(paths, pair) {
@@ -168,10 +172,24 @@ pub fn prepare(paths: &Paths, pair: u32, ticket: &str) -> Result<PathBuf> {
     .is_ok();
     if exists {
         git(root, &["worktree", "add", &dir_arg, &branch])?;
+        catch_up(paths, pair, &dir);
     } else {
         git(root, &["worktree", "add", "-b", &branch, &dir_arg, "HEAD"])?;
     }
     Ok(dir)
+}
+
+/// Rebase the branch checked out in `dir` onto the main tree's HEAD when it is behind and the
+/// worktree is clean. A conflicting rebase is aborted, leaving the branch untouched.
+fn catch_up(paths: &Paths, pair: u32, dir: &Path) {
+    let Ok(base) = git(&paths.root, &["rev-parse", "HEAD"]) else {
+        return;
+    };
+    let base = base.trim();
+    let behind = git(dir, &["merge-base", "--is-ancestor", base, "HEAD"]).is_err();
+    if behind && !dirty(paths, pair) && git(dir, &["rebase", base]).is_err() {
+        let _ = git(dir, &["rebase", "--abort"]);
+    }
 }
 
 /// The commit the ticket branch forked from: everything after it is the ticket's own history.

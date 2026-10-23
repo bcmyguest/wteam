@@ -245,6 +245,52 @@ fn requeue_without_fresh_keeps_the_wip_for_the_next_dispatch() {
     assert!(r.read(".wteam-fake/role").is_empty(), "role prompt resent");
 }
 
+/// Commit `file` with `body` on main, as a blocker's work landing while `01` waits.
+fn land_on_main(r: &Repo, file: &str, body: &str) {
+    r.write(file, body);
+    r.git(&["add", file]);
+    r.git(&["commit", "-q", "-m", "land"]);
+}
+
+#[test]
+fn requeue_rebases_preserved_work_onto_work_landed_since() {
+    let r = blocked_wip_repo();
+    land_on_main(&r, "src/landed.txt", "from 02\n");
+    let main = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.wteam().args(["requeue", "01"]).assert().success();
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |_| r.fake_dir().join("head").exists());
+    let files = r.read(".wteam-fake/files");
+    assert!(files.contains("landed.txt"), "landed work missing: {files}");
+    assert!(files.contains("wip.txt"), "preserved work lost: {files}");
+    let head = r.read(".wteam-fake/head").trim().to_string();
+    assert!(
+        r.git(&["merge-base", "--is-ancestor", &main, &head])
+            .is_empty(),
+        "branch not rebased onto main"
+    );
+}
+
+#[test]
+fn requeue_keeps_preserved_work_when_the_rebase_conflicts() {
+    let r = blocked_wip_repo();
+    let before = r.git(&["rev-parse", "wteam/demo/01"]);
+    land_on_main(&r, "src/wip.txt", "main's version\n");
+    r.wteam().args(["requeue", "01"]).assert().success();
+    r.wteam().args(["dispatch", "01"]).assert().success();
+    r.wait_for(60, |_| r.fake_dir().join("head").exists());
+    assert_eq!(
+        r.read(".wteam-fake/head").trim(),
+        before.trim(),
+        "branch moved"
+    );
+    let wt = r.path().join(".wteam/demo/worktrees/pair1");
+    assert_eq!(
+        std::fs::read_to_string(wt.join("src/wip.txt")).unwrap(),
+        "wip\n"
+    );
+}
+
 #[test]
 fn requeue_fresh_clears_the_sessions_bound_to_the_ticket() {
     let r = blocked_wip_repo();
