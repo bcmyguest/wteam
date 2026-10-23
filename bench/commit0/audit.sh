@@ -10,7 +10,8 @@ import json, re, sys
 import os
 pat = re.compile(r"commit0-cache|commit0-ref|commit0-venvs/[^/ ]*/lib|site-packages|pip3? (download|install|show)|find / |pypi|github\.com/scott-griffiths|wteam-bench/(runs|tasks)")
 own = os.environ.get("OWN", "\0")
-other_run = re.compile(r"/tmp/[\w.-]*(bitstring|tinydb|voluptuous|marshmallow|imapclient|incidentkit)[\w./-]*")
+# Any /tmp path outside this run (other runs, extracted archives, stray reference copies).
+other_run = re.compile(r"/tmp/(?!claude-)[\w.-]+[\w./-]*")
 def flagged(text):
     return pat.search(text) or any(not m.group(0).startswith(own) and not m.group(0).startswith(own + ".logs") for m in other_run.finditer(text))
 hits = set()
