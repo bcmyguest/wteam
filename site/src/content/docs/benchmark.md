@@ -70,6 +70,12 @@ and handing it wteam's plan did not help. Planning, review and parallel pairs sh
 These tasks hand the agent every rule up front; vague goals, changes to existing code and debugging,
 where a single session tends to drift, are not benchmarked.
 
+**Code quality is where wteam wins.** Since every arm passed the same tests, Opus judged each module
+pair blind, in both orders. It preferred wteam's code in 27 of 30 comparisons, and 22 of 30 in a
+repeat run, citing smaller named helpers, one place per rule, located error messages and docstrings.
+The edge comes from the ticket structure, one focused worker per module; Sonnet reviewers did not add
+to it in the one run that isolates them.
+
 ## Defects the benchmark found
 
 Every early wteam failure was a wteam bug, not a model limit. Each became a ticket:
