@@ -13,7 +13,7 @@ through append-only mailboxes under `.wteam/`. Documentation site:
 
 ## Benchmark
 
-**Not wteam's target workload:** [Aider's polyglot benchmark](https://github.com/Aider-AI/polyglot-benchmark) is 34 small, independent exercises, scored here with **hidden tests**. wteam is built for large efforts with dependent tickets; that benchmark is in progress.
+**Not wteam's target workload:** [Aider's polyglot benchmark](https://github.com/Aider-AI/polyglot-benchmark) is 34 small, independent exercises, scored here with **hidden tests**. wteam is built for large efforts with dependent tickets.
 
 | Configuration | Passed | Wall time | Cost |
 |---|---|---|---|
@@ -24,6 +24,8 @@ through append-only mailboxes under `.wteam/`. Documentation site:
 
 Small independent tasks favour a single session. A stronger reviewer lifts cheap workers, but at a cost.
 Full results, method and caveats: [benchmark page](https://bcmyguest.github.io/wteam/benchmark/) and `bench/polyglot/`.
+
+Larger multi-ticket tasks (a Commit0 library rebuild and an 83 KB spec with 2,399 hidden tests) gave the same answer: single Haiku matched wteam at 2–10× lower cost. Both tasks hand the agent a precise spec, which is where a single session is strongest. Vague goals, brownfield changes and debugging are not benchmarked. Results: `bench/results/2026-10-22.md`.
 
 ## Install
 
