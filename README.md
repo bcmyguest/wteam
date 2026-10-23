@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/bcmyguest/wteam/actions/workflows/ci.yml/badge.svg)](https://github.com/bcmyguest/wteam/actions/workflows/ci.yml)
 
-Portable worker/reviewer teams for coding agents (Claude Code, Codex, opencode, Cursor).
+Portable worker/reviewer teams for coding agents (Claude Code, Codex, opencode, Pi; Cursor permission profiles only, no runner yet).
 
 wteam runs planned tickets through pairs of agents. A worker implements a
 ticket, a reviewer passes or fails it, and a passed ticket commits. Agents talk
