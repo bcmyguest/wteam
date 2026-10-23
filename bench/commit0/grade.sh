@@ -12,6 +12,8 @@ case "$LIB" in
   bitstring) TESTS=tests; TOTAL=834; ARGS="" ;;
   marshmallow) TESTS=tests; TOTAL=1228; ARGS=""; PP=src ;;   # test_version_attributes needs installed metadata
   imapclient) TESTS=tests; TOTAL=267; ARGS="" ;;
+  incidentkit-debug) TESTS=tests; TOTAL=2399; ARGS=""; LIB=incidentkit2
+    CACHE="${BENCH_TASKS:-$HOME/.cache/wteam-bench/tasks}"; [ -e "$CACHE/$LIB/tests" ] || exit 2 ;;
   incidentkit|incidentkit2) TESTS=tests; TOTAL=$(cat "${BENCH_TASKS:-$HOME/.cache/wteam-bench/tasks}/$LIB/TOTAL" 2>/dev/null || echo "?"); ARGS=""
     CACHE="${BENCH_TASKS:-$HOME/.cache/wteam-bench/tasks}"; [ -e "$CACHE/$LIB/tests" ] || exit 2 ;;
   *) echo "unknown lib $LIB" >&2; exit 2 ;;

@@ -8,6 +8,21 @@ set -eu
 LIB="$1"; OUT="$2"; MODE="${3:-}"
 CACHE="${BENCH_CACHE:-/tmp/commit0-cache}"
 # incidentkit: our own task (bench/incidentkit/SPEC.md); its tests live outside every repo.
+# incidentkit-debug: the incidentkit v2 reference with 12 planted bugs and one symptom-only
+# report per bug (renamed NN.md so file names carry no hint); no spec.
+if [ "$LIB" = incidentkit-debug ]; then
+  SRC="${BENCH_TASKS:-$HOME/.cache/wteam-bench/tasks}/incidentkit-debug"
+  rm -rf "$OUT" && mkdir -p "$OUT/reports"
+  cp -R "$SRC/buggy/incidentkit" "$OUT/incidentkit"
+  find "$OUT/incidentkit" -name __pycache__ -prune -exec rm -rf {} +
+  for f in "$SRC"/reports/[0-9][0-9]-*.md; do b=$(basename "$f"); cp "$f" "$OUT/reports/${b%%-*}.md"; done
+  printf '.pytest_cache/\n__pycache__/\nscratch/\n' > "$OUT/.gitignore"
+  cd "$OUT"
+  git init -q -b main && git config user.email bench@example.com && git config user.name bench
+  git add -A && git -c commit.gpgsign=false commit -qm "chore: incidentkit with open bug reports"
+  if [ "$MODE" = wteam ]; then wteam --slug bench init >/dev/null; fi
+  echo "$OUT: $LIB ready"; exit 0
+fi
 case "$LIB" in incidentkit) SPECF=SPEC.md ;; incidentkit2) SPECF=SPEC-v2.md ;; *) SPECF= ;; esac
 if [ -n "$SPECF" ]; then
   rm -rf "$OUT" && mkdir -p "$OUT/incidentkit"
