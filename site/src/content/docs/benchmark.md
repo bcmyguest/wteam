@@ -1,6 +1,6 @@
 ---
 title: Benchmark
-description: wteam against single-agent baselines on Aider's polyglot benchmark (Python), with every result, including the unflattering ones.
+description: wteam against single-agent baselines on Aider's polyglot benchmark, a Commit0 library rebuild and an 83 KB spec with 2,399 hidden tests, with every result, including the unflattering ones.
 ---
 
 One run per configuration on 2026-10-22, so treat differences of one or two exercises as noise.
@@ -51,6 +51,24 @@ The harness is in [`bench/polyglot/`](https://github.com/bcmyguest/wteam/tree/ma
 - **Parallel pairs are faster.** With four pairs, wteam beat the matching single Haiku session on wall time in both modes.
 - **`--dispatch auto` (now the default) removes orchestrator cost.** Model-driven dispatch spent $0.79–$0.87 per run on
   turns that only ran `wteam dispatch --fill`; auto dispatch spent $0.00–$0.05.
+
+## Larger multi-ticket tasks
+
+Polyglot exercises are small and independent, so on 2026-10-22 we also ran tasks with dependent tickets.
+One run per arm; "wteam" is an Opus planner, Haiku workers and Sonnet reviewers in 4 pairs.
+Every score was checked for memorized upstream code and for reads outside the run's own repo.
+Full tables and method: [`bench/results/2026-10-22.md`](https://github.com/bcmyguest/wteam/blob/main/bench/results/2026-10-22.md).
+
+| Task | Single Haiku | wteam |
+|---|---|---|
+| bitstring rebuild ([Commit0](https://github.com/commit-0), 834 hidden tests) | 681, $3.55, 27 min | 684, $9.64, 51 min |
+| incidentkit v1 (own 20 KB spec, 523 hidden tests) | 523, $0.16, 6 min | 523, $3.00, 11 min |
+| incidentkit v2 (own 83 KB spec, five interacting subsystems, 2,399 hidden tests) | 2399, $0.77, 11 min | 2399, $7.47, 16 min |
+
+On greenfield work from a precise written spec, a single Haiku session matched wteam at 2–10× lower cost,
+and handing it wteam's plan did not help. Planning, review and parallel pairs showed no value here.
+These tasks hand the agent every rule up front; vague goals, changes to existing code and debugging,
+where a single session tends to drift, are not benchmarked.
 
 ## Defects the benchmark found
 
