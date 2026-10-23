@@ -8,16 +8,17 @@ set -eu
 LIB="$1"; OUT="$2"; MODE="${3:-}"
 CACHE="${BENCH_CACHE:-/tmp/commit0-cache}"
 # incidentkit: our own task (bench/incidentkit/SPEC.md); its tests live outside every repo.
-if [ "$LIB" = incidentkit ]; then
+case "$LIB" in incidentkit) SPECF=SPEC.md ;; incidentkit2) SPECF=SPEC-v2.md ;; *) SPECF= ;; esac
+if [ -n "$SPECF" ]; then
   rm -rf "$OUT" && mkdir -p "$OUT/incidentkit"
-  cp "$(cd "$(dirname "$0")/.." && pwd)/incidentkit/SPEC.md" "$OUT/SPEC.md"
+  cp "$(cd "$(dirname "$0")/.." && pwd)/incidentkit/$SPECF" "$OUT/SPEC.md"
   : > "$OUT/incidentkit/__init__.py"
   printf '.pytest_cache/\n__pycache__/\nscratch/\n' > "$OUT/.gitignore"
   cd "$OUT"
   git init -q -b main && git config user.email bench@example.com && git config user.name bench
   git add -A && git -c commit.gpgsign=false commit -qm "chore: incidentkit spec and empty package"
   if [ "$MODE" = wteam ]; then wteam --slug bench init >/dev/null; fi
-  echo "$OUT: incidentkit ready"; exit 0
+  echo "$OUT: $LIB ready"; exit 0
 fi
 case "$LIB" in
   tinydb) TESTS=tests ;;
