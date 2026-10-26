@@ -233,8 +233,11 @@ cd site && pnpm install && pnpm build
 ```
 
 The demo GIF (`site/public/demo.gif`) is rendered from `site/demo.tape` with
-`vhs` (scripted stand-in agents from `site/demo/setup.sh`); the tape's header
-has the Docker command.
+`vhs` (scripted stand-in agents from `site/demo/setup.sh`):
+
+```bash
+sh site/demo/render.sh
+```
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org)
 (`feat:`, `fix:`, `docs:`, …), enforced by a commit-msg hook. The commit type
