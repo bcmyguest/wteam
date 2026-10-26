@@ -27,3 +27,6 @@ Extend the existing wteam implementation without changing its public architectur
 Preserve existing behavior and conventions. Run `cargo fmt --check` and the full
 Rust test suite before finishing. Do not inspect Git history or retrieve another
 implementation.
+
+Land all changes on the **main** branch (normal commits). Use the `wteam` binary
+on PATH; do not build or run wteam from this checkout with `cargo`.

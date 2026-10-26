@@ -23,3 +23,7 @@ hidden gate (also named in `task.md` and validate-out).
 Wteam harness runs install `.wteam/bench/hidden_gate.sh` and a project
 `validate-out` role that runs it, so Goldfish validation and `grade.sh` share
 the same pinned suite (checkout `cargo test` alone is not the gate).
+
+Default bench run uses `--isolation none` (grade reads **main**), harness
+`wteam` on PATH, and `WTEAM_BENCH_REVIEW=autopass` (fake reviewer) unless set
+to `cursor`.

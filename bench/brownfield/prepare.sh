@@ -27,5 +27,6 @@ if [ "$MODE" = wteam ]; then
   WTEAM=$(wteam_bin)
   "$WTEAM" --slug bench init >/dev/null
   install_bench_gate "$OUT" "$HERE"
+  install_bench_docs "$OUT"
 fi
 echo "$OUT: brownfield base $BASE ready"

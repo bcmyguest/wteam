@@ -18,8 +18,10 @@ SPEC_LIGHT=${WTEAM_BENCH_SPEC_LIGHT_MODEL:-$MODEL}
 SPEC_HEAVY=${WTEAM_BENCH_SPEC_HEAVY_MODEL:-$MODEL}
 REWRITE_CAP=${WTEAM_BENCH_PLAN_REWRITE_CAP:-3}
 RUN_TIMEOUT=${RUN_TIMEOUT:-1800}
+ISOLATION=${WTEAM_BENCH_ISOLATION:-none}
 
 sh "$HERE/prepare.sh" "$OUT" wteam
+export WTEAM_FAKE_DIR="${WTEAM_FAKE_DIR:-$OUT/.wteam-fake}"
 rm -rf "$LOGS"
 mkdir -p "$LOGS"
 mkdir -p "$OUT/.wteam/agents"
@@ -33,7 +35,7 @@ write_agent() {
 write_agent planner plan "$MODEL"
 write_agent orchestrator control "$MODEL"
 write_agent worker edit "$WORKER_MODEL"
-write_agent reviewer review "$REVIEWER_MODEL"
+write_reviewer_agent "$OUT" "$REVIEWER_MODEL"
 write_agent spec-comprehension plan "$SPEC_LIGHT"
 write_agent spec-critic plan "$SPEC_HEAVY"
 write_agent spec-readiness plan "$SPEC_HEAVY"
@@ -89,8 +91,10 @@ $FINDINGS"
   "$WTEAM" --root "$OUT" --slug bench pickup >"$LOGS/pickup.after-rewrite.$i.txt" 2>&1 || true
 done
 
-timeout "$((RUN_TIMEOUT + 600))" "$WTEAM" --root "$OUT" --slug bench run --pairs "$PAIRS" --dispatch auto --replan --timeout "$RUN_TIMEOUT" --max-turns 200 \
+timeout "$((RUN_TIMEOUT + 600))" "$WTEAM" --root "$OUT" --slug bench run --pairs "$PAIRS" --isolation "$ISOLATION" --dispatch auto --replan --timeout "$RUN_TIMEOUT" --max-turns 200 \
   >"$LOGS/run.txt" 2>&1
+echo "bench_isolation $ISOLATION" >>"$LOGS/metrics.txt"
+echo "bench_review ${WTEAM_BENCH_REVIEW:-autopass}" >>"$LOGS/metrics.txt"
 
 write_agent validate-local review "$SPEC_LIGHT"
 write_agent validate-mid review "$SPEC_HEAVY"

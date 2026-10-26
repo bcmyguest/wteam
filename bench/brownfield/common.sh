@@ -35,9 +35,69 @@ wteam_bin() {
   exit 1
 }
 
+install_bench_brief() {
+  OUT=$1
+  mkdir -p "$OUT/.wteam"
+  cat >"$OUT/.wteam/brief.md" <<'EOF'
+# Brownfield bench
+
+- Use `wteam` from PATH (harness release). Do not `cargo run` or build wteam from this checkout.
+- Land ticket work on **main** with normal commits; the hidden grader reads the main tree.
+- When `.wteam/bench/hidden_gate.sh` exists, run it for the full verification gate.
+EOF
+}
+
+install_bench_docs() {
+  OUT=$1
+  [ -f "$OUT/CLAUDE.md" ] || return 0
+  if ! grep -q '## Brownfield bench' "$OUT/CLAUDE.md" 2>/dev/null; then
+    cat >>"$OUT/CLAUDE.md" <<'EOF'
+
+## Brownfield bench
+
+Use the harness `wteam` on PATH for every agent command. This checkout is a historical snapshot; do not run wteam from `cargo` here.
+EOF
+    (cd "$OUT" && git add CLAUDE.md && git commit -qm "docs: bench uses harness wteam on PATH")
+  fi
+}
+
+install_autopass_reviewer() {
+  OUT=$1
+  mkdir -p "$OUT/.wteam/roles" "$OUT/.wteam-fake"
+  cat >"$OUT/.wteam/roles/autopass.md" <<'EOF'
+# autopass reviewer (brownfield bench)
+
+Run exactly one command: `wteam verdict NN pass` with NN the ticket id from your message.
+EOF
+  cat >"$OUT/.wteam-fake/reviewer.sh" <<'EOF'
+#!/bin/sh
+set -eu
+id=$(printf '%s\n' "$WTEAM_PROMPT" | sed -n 's/.*[Tt]icket \([0-9][0-9]\).*/\1/p' | head -1)
+[ -n "$id" ] || { echo "no ticket id in prompt"; exit 1; }
+wteam verdict "$id" pass
+EOF
+  chmod +x "$OUT/.wteam-fake/reviewer.sh"
+  export WTEAM_FAKE_DIR="$OUT/.wteam-fake"
+}
+
+write_reviewer_agent() {
+  OUT=$1
+  MODEL=$2
+  REVIEW_MODE=${WTEAM_BENCH_REVIEW:-autopass}
+  if [ "$REVIEW_MODE" = cursor ]; then
+    printf 'name = "reviewer"\ncli = "cursor"\nmodel = "%s"\nprompt = "reviewer"\nprofile = "review"\nextra_args = ["--force"]\n' \
+      "$MODEL" >"$OUT/.wteam/agents/reviewer.toml"
+  else
+    install_autopass_reviewer "$OUT"
+    printf 'name = "reviewer"\ncli = "fake"\nmodel = "fake"\nprompt = "autopass"\nprofile = "review"\n' \
+      >"$OUT/.wteam/agents/reviewer.toml"
+  fi
+}
+
 install_bench_gate() {
   OUT=$1
   BENCH=$2
+  install_bench_brief "$OUT"
   mkdir -p "$OUT/.wteam/bench" "$OUT/.wteam/roles"
   cat >"$OUT/.wteam/bench/hidden_gate.sh" <<EOF
 #!/bin/sh
