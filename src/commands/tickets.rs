@@ -7,10 +7,78 @@ use serde_json::json;
 
 use super::Out;
 use crate::cli::{
-    BlockArgs, DispatchArgs, Global, RequeueArgs, SubmitArgs, TicketArg, VerdictArgs, VerdictValue,
+    BlockArgs, DispatchArgs, Global, RequeueArgs, SubmitArgs, TicketArg, TicketsCommand,
+    TicketsListArgs, VerdictArgs, VerdictValue,
 };
 use crate::engine::{self, Ctx};
 use crate::state::{TicketStatus, Verdict, VerdictKind};
+
+pub fn run_subcommand(g: &Global, cmd: &TicketsCommand) -> Result<Out> {
+    match cmd {
+        TicketsCommand::List(a) => list(g, a),
+    }
+}
+
+pub fn list(g: &Global, a: &TicketsListArgs) -> Result<Out> {
+    let p = super::effort(g)?;
+    let tickets = crate::work::load_tickets(&p.tickets_dir())?;
+    let st = crate::state::load(&p)?;
+    let status_filter = match &a.status {
+        Some(raw) => Some(
+            TicketStatus::parse_filter(raw)
+                .with_context(|| format!("unknown status filter `{raw}`"))?,
+        ),
+        None => None,
+    };
+
+    let mut text = String::new();
+    let mut rows = Vec::new();
+    for t in &tickets {
+        let ts = st.tickets.get(&t.id).cloned().unwrap_or_default();
+        if status_filter.is_some_and(|f| ts.status != f) {
+            continue;
+        }
+        let blockers = if t.blocked_by.is_empty() {
+            "-".to_string()
+        } else {
+            t.blocked_by.join(", ")
+        };
+        text.push_str(&format!(
+            "{}  {}  [{}]  blocked_by={}",
+            t.id,
+            t.title,
+            ts.status.as_str(),
+            blockers
+        ));
+        if let Some(a) = &ts.assignee {
+            text.push_str(&format!("  assignee={a}"));
+        }
+        if let Some(pair) = ts.pair {
+            text.push_str(&format!("  pair={pair}"));
+        }
+        text.push('\n');
+        rows.push(json!({
+            "id": t.id,
+            "title": t.title,
+            "status": ts.status.as_str(),
+            "blocked_by": t.blocked_by,
+            "assignee": ts.assignee,
+            "pair": ts.pair,
+            "rounds": ts.rounds,
+            "blocked_reason": ts.blocked_reason,
+            "note": ts.note,
+            "files": t.files,
+            "verify": t.verify,
+        }));
+    }
+    if rows.is_empty() {
+        text.push_str("no tickets\n");
+    }
+    Ok(Out::new(
+        text.trim_end().to_string(),
+        json!({ "tickets": rows }),
+    ))
+}
 
 pub fn dispatch(g: &Global, a: &DispatchArgs) -> Result<Out> {
     let ctx = Ctx::load(super::effort(g)?)?;

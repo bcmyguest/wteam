@@ -23,6 +23,33 @@ pub enum TicketStatus {
     Blocked,
 }
 
+impl TicketStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Todo => "todo",
+            Self::Doing => "doing",
+            Self::Review => "review",
+            Self::AwaitingApproval => "awaiting_approval",
+            Self::Done => "done",
+            Self::Blocked => "blocked",
+        }
+    }
+
+    pub fn parse_filter(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "todo" => Some(Self::Todo),
+            "doing" => Some(Self::Doing),
+            "review" => Some(Self::Review),
+            "awaiting_approval" | "awaiting-approval" | "awaitingapproval" => {
+                Some(Self::AwaitingApproval)
+            }
+            "done" => Some(Self::Done),
+            "blocked" => Some(Self::Blocked),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerdictKind {

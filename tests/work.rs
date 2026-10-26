@@ -73,6 +73,36 @@ fn ready_follows_done_blockers_and_skips_started_tickets() {
 }
 
 #[test]
+fn tickets_list_shows_blockers_without_agents() {
+    let r = repo();
+    r.wteam()
+        .args(["tickets", "list"])
+        .assert()
+        .success()
+        .stdout(contains("01  First thing  [todo]  blocked_by=-"))
+        .stdout(contains("02  Second thing  [todo]  blocked_by=01"))
+        .stdout(contains("agents:").not());
+    let v = json_of(&r, &["tickets", "list"]);
+    assert_eq!(v["tickets"].as_array().unwrap().len(), 3);
+    assert_eq!(v["tickets"][1]["blocked_by"], serde_json::json!(["01"]));
+}
+
+#[test]
+fn tickets_list_status_filter() {
+    let r = repo();
+    set_state(
+        &r,
+        serde_json::json!({"slug": "demo", "tickets": {
+            "01": {"status": "done"},
+            "02": {"status": "blocked", "blocked_reason": "stuck"},
+        }}),
+    );
+    let v = json_of(&r, &["tickets", "list", "--status", "blocked"]);
+    assert_eq!(v["tickets"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tickets"][0]["id"], "02");
+}
+
+#[test]
 fn status_defaults_to_todo_and_shows_ticket_titles() {
     let r = repo();
     r.wteam()

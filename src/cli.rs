@@ -54,6 +54,9 @@ pub enum Command {
     Status,
     /// Tickets whose blockers are done.
     Ready,
+    /// Ticket graph and lifecycle subcommands.
+    #[command(subcommand)]
+    Tickets(TicketsCommand),
     /// Assign a ticket to a worker and start its turn (orchestrator).
     Dispatch(DispatchArgs),
     /// Hand a finished round to review (worker).
@@ -334,6 +337,19 @@ pub struct PermissionsArgs {
     /// CLIs to show: claude, codex, opencode, cursor, pi (default: the first four).
     #[arg(long = "cli")]
     pub clis: Vec<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TicketsCommand {
+    /// List tickets with status, blockers, and assignees.
+    List(TicketsListArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TicketsListArgs {
+    /// Show only tickets in this status (todo, doing, review, blocked, done, awaiting_approval).
+    #[arg(long)]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]

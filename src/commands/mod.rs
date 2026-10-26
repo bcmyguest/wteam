@@ -76,6 +76,7 @@ pub fn run(g: &Global, cmd: &Command) -> Result<Out> {
         Command::PlanVerdict(a) => phase::plan_verdict(g, a),
         Command::Status => status::status(g),
         Command::Ready => status::ready(g),
+        Command::Tickets(c) => tickets::run_subcommand(g, c),
         Command::Dispatch(a) => tickets::dispatch(g, a),
         Command::Submit(a) => tickets::submit(g, a),
         Command::Verdict(a) => tickets::verdict(g, a),

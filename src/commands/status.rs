@@ -8,19 +8,6 @@ use crate::cli::Global;
 use crate::state;
 use crate::work;
 
-/// Snake-case name of a ticket status, as stored in `state.json`.
-fn status_name(s: state::TicketStatus) -> &'static str {
-    use state::TicketStatus::*;
-    match s {
-        Todo => "todo",
-        Doing => "doing",
-        Review => "review",
-        AwaitingApproval => "awaiting_approval",
-        Done => "done",
-        Blocked => "blocked",
-    }
-}
-
 pub fn status(g: &Global) -> Result<Out> {
     let p = super::effort(g)?;
     // Loading the context heals dead turn processes before the state is read.
@@ -33,7 +20,7 @@ pub fn status(g: &Global) -> Result<Out> {
     let mut rows = Vec::new();
     for t in &tickets {
         let ts = st.tickets.get(&t.id).cloned().unwrap_or_default();
-        let name = status_name(ts.status);
+        let name = ts.status.as_str();
         text.push_str(&format!("{}  {}  [{}]", t.id, t.title, name));
         if let Some(a) = &ts.assignee {
             text.push_str(&format!("  {a}"));
