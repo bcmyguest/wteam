@@ -1,6 +1,6 @@
 #!/bin/sh
-# Builds the repo the demo GIF records: four tickets (01 → 02,03 → 04) and
-# scripted stand-in agents (cli = "fake") so the recording is fast and repeatable.
+# Builds the repo the demo GIF records: git init + wteam init; tickets come from
+# `wteam tickets add` in demo.tape (scripted stand-in agents for the run).
 set -eu
 D="${1:-/tmp/wteam-demo}"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -9,17 +9,8 @@ git init -q -b main
 git config user.email demo@example.com && git config user.name demo
 echo "# demo" > README.md && git add -A && git commit -qm "chore: init"
 wteam --slug demo init >/dev/null
-cp "$SCRIPT_DIR/dashboard.sh" "$SCRIPT_DIR/tmux-start.sh" "$D/"
-chmod +x "$D/dashboard.sh" "$D/tmux-start.sh"
-T=.wteam/demo/tickets
-ticket() { # id title blockers file
-  printf '# %s: %s\n\n**What to build:** %s.\n\n**Blocked by:** %s\n\n**Status:** ready-for-agent\n\n**Files:** %s\n\n- [ ] done\n' \
-    "$1" "$2" "$2" "$3" "$4" > "$T/$1-$(echo "$2" | tr ' A-Z' '-a-z').md"
-}
-ticket 01 "Tracer bullet" "None (can start immediately)" src/core.py
-ticket 02 "Parser" "01" src/parser.py
-ticket 03 "Renderer" "01" src/render.py
-ticket 04 "CLI glue" "02, 03" src/greet.py
+cp "$SCRIPT_DIR/dashboard.sh" "$SCRIPT_DIR/tmux-start.sh" "$SCRIPT_DIR/seed-tickets.sh" "$D/"
+chmod +x "$D/dashboard.sh" "$D/tmux-start.sh" "$D/seed-tickets.sh"
 mkdir -p .wteam/agents .wteam-fake
 for r in orchestrator worker reviewer; do
   printf 'name = "%s"\ncli = "fake"\nprompt = "%s"\nprofile = "edit"\n' $r $r > .wteam/agents/$r.toml

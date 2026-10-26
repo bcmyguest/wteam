@@ -27,9 +27,12 @@ Ctrl+L
 Sleep 500ms
 Show
 
-Type "# greet CLI: ticket 01 kicks off the feature"
+Type "# greet CLI: wteam tickets add (see seed-tickets.sh)"
 Enter
 Sleep 500ms
+Type "sh seed-tickets.sh"
+Enter
+Sleep 4s
 Type "wteam --slug demo tickets list"
 Enter
 Sleep 2.5s

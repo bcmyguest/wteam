@@ -64,7 +64,7 @@ fn split_label(line: &str) -> Option<(&str, &str)> {
 }
 
 /// Normalise a ticket reference (`1`, `#01`) to its two-digit form.
-fn normalize_id(raw: &str) -> Option<String> {
+pub fn normalize_id(raw: &str) -> Option<String> {
     let t = raw.trim().trim_start_matches('#');
     if t.is_empty() || !t.chars().all(|c| c.is_ascii_digit()) {
         return None;
@@ -73,7 +73,7 @@ fn normalize_id(raw: &str) -> Option<String> {
 }
 
 /// Ids from a `Blocked by:` value: `01, 02`, `#1 2`, `01: Title`, or prose like "None (...)".
-fn parse_blockers(value: &str) -> Vec<String> {
+pub fn parse_blockers(value: &str) -> Vec<String> {
     let mut out = Vec::new();
     for seg in value.split(',') {
         let mut tokens = seg.split_whitespace();
@@ -89,7 +89,7 @@ fn parse_blockers(value: &str) -> Vec<String> {
     out
 }
 
-fn split_list(value: &str, sep: char) -> Vec<String> {
+pub fn split_list(value: &str, sep: char) -> Vec<String> {
     value
         .split(sep)
         .map(|s| s.trim().trim_matches('`').trim().to_string())
@@ -219,6 +219,93 @@ pub fn load_tickets(dir: &Path) -> Result<Vec<Ticket>> {
     }
     tickets.sort_by(|a, b| id_cmp(&a.id, &b.id).then_with(|| a.path.cmp(&b.path)));
     Ok(tickets)
+}
+
+/// Slug for `tickets/NN-<slug>.md` from a title.
+pub fn title_slug(title: &str) -> String {
+    title.to_lowercase().replace(' ', "-")
+}
+
+/// Next unused two-digit ticket id in `tickets`.
+pub fn next_ticket_id(tickets: &[Ticket]) -> String {
+    let max = tickets
+        .iter()
+        .filter_map(|t| t.id.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("{:02}", max + 1)
+}
+
+fn format_blocked_by(ids: &[String]) -> String {
+    if ids.is_empty() {
+        "None (can start immediately)".to_string()
+    } else {
+        ids.join(", ")
+    }
+}
+
+/// Markdown for a new ticket file.
+pub fn render_ticket_markdown(
+    id: &str,
+    title: &str,
+    what: &str,
+    blocked_by: &[String],
+    files: &[String],
+    verify: &[String],
+) -> String {
+    let mut body = format!(
+        "# {id}: {title}\n\n**What to build:** {what}\n\n**Blocked by:** {}\n\n**Status:** ready-for-agent\n\n",
+        format_blocked_by(blocked_by)
+    );
+    if !files.is_empty() {
+        body.push_str(&format!("**Files:** {}\n\n", files.join(", ")));
+    }
+    if !verify.is_empty() {
+        body.push_str(&format!("**Verify:** {}\n\n", verify.join("; ")));
+    }
+    body.push_str("- [ ] done\n");
+    body
+}
+
+/// Write a ticket file under `dir` and return the parsed ticket.
+pub fn add_ticket(
+    dir: &Path,
+    id: Option<&str>,
+    title: &str,
+    what: &str,
+    blocked_by: Vec<String>,
+    files: Vec<String>,
+    verify: Vec<String>,
+) -> Result<Ticket> {
+    let title = title.trim();
+    if title.is_empty() {
+        bail!("title must not be empty");
+    }
+    let existing = load_tickets(dir)?;
+    for b in &blocked_by {
+        if !existing.iter().any(|t| &t.id == b) {
+            bail!("blocked by unknown ticket {b}");
+        }
+    }
+    let id = match id {
+        Some(raw) => normalize_id(raw).context("invalid ticket id")?,
+        None => next_ticket_id(&existing),
+    };
+    if existing.iter().any(|t| t.id == id) {
+        bail!("ticket {id} already exists");
+    }
+    let slug = title_slug(title);
+    if slug.is_empty() {
+        bail!("title must contain alphanumeric characters");
+    }
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join(format!("{id}-{slug}.md"));
+    if path.exists() {
+        bail!("ticket file `{}` already exists", path.display());
+    }
+    let md = render_ticket_markdown(&id, title, what, &blocked_by, &files, &verify);
+    std::fs::write(&path, &md).with_context(|| format!("writing {}", path.display()))?;
+    parse_ticket(&md, &path)
 }
 
 /// Problems that make a work graph unrunnable.

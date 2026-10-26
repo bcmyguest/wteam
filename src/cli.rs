@@ -343,6 +343,29 @@ pub struct PermissionsArgs {
 pub enum TicketsCommand {
     /// List tickets with status, blockers, and assignees.
     List(TicketsListArgs),
+    /// Add a ticket markdown file under the effort.
+    Add(TicketsAddArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TicketsAddArgs {
+    /// Short title (also the default "what to build" text).
+    pub title: String,
+    /// Ticket id (default: next free id, e.g. `03`).
+    #[arg(long)]
+    pub id: Option<String>,
+    /// Override **What to build:** (default: `<title>.`).
+    #[arg(long)]
+    pub what: Option<String>,
+    /// Blocker ids (`01,02`) or `none` for no blockers.
+    #[arg(long = "blocked-by")]
+    pub blocked_by: Option<String>,
+    /// Paths or globs the ticket may touch (comma-separated).
+    #[arg(long)]
+    pub files: Option<String>,
+    /// Commands to verify the ticket (`;`-separated).
+    #[arg(long)]
+    pub verify: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -14,6 +14,8 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `pickup` | Import planning material and verify it (`--from <dir>`) |
 | `status` | Tickets, agents and pending events |
 | `ready` | Tickets whose blockers are done |
+| `tickets list` | Tickets with status, blockers, assignees (`--status`) |
+| `tickets add <title>` | Create a ticket file (`--id`, `--what`, `--blocked-by`, `--files`, `--verify`) |
 | `dispatch <ticket>` | Assign a ticket to a worker (`--pair <n>`) |
 | `submit <ticket>` | Hand a finished round to review (`--summary <text>` or `--summary-file <path>`) |
 | `verdict <ticket> pass\|fail` | Record a verdict (`--file <path>` with FINDINGS/NOTES/FOLLOW-UPS sections, or `--finding`, `--note`, `--follow-up`) |

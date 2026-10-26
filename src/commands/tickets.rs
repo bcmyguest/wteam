@@ -7,8 +7,8 @@ use serde_json::json;
 
 use super::Out;
 use crate::cli::{
-    BlockArgs, DispatchArgs, Global, RequeueArgs, SubmitArgs, TicketArg, TicketsCommand,
-    TicketsListArgs, VerdictArgs, VerdictValue,
+    BlockArgs, DispatchArgs, Global, RequeueArgs, SubmitArgs, TicketArg, TicketsAddArgs,
+    TicketsCommand, TicketsListArgs, VerdictArgs, VerdictValue,
 };
 use crate::engine::{self, Ctx};
 use crate::state::{TicketStatus, Verdict, VerdictKind};
@@ -16,7 +16,63 @@ use crate::state::{TicketStatus, Verdict, VerdictKind};
 pub fn run_subcommand(g: &Global, cmd: &TicketsCommand) -> Result<Out> {
     match cmd {
         TicketsCommand::List(a) => list(g, a),
+        TicketsCommand::Add(a) => add(g, a),
     }
+}
+
+pub fn add(g: &Global, a: &TicketsAddArgs) -> Result<Out> {
+    let p = super::effort(g)?;
+    let blocked_by = parse_blocked_by_arg(a.blocked_by.as_deref())?;
+    let files = a
+        .files
+        .as_deref()
+        .map(|f| crate::work::split_list(f, ','))
+        .unwrap_or_default();
+    let verify = a
+        .verify
+        .as_deref()
+        .map(|f| crate::work::split_list(f, ';'))
+        .unwrap_or_default();
+    let what = a
+        .what
+        .clone()
+        .unwrap_or_else(|| format!("{}.", a.title.trim()));
+    let t = crate::work::add_ticket(
+        &p.tickets_dir(),
+        a.id.as_deref(),
+        &a.title,
+        &what,
+        blocked_by,
+        files,
+        verify,
+    )?;
+    let path = t.path.to_string_lossy();
+    Ok(Out::new(
+        format!("added {} {}", t.id, t.title),
+        json!({
+            "id": t.id,
+            "title": t.title,
+            "path": path,
+            "blocked_by": t.blocked_by,
+            "files": t.files,
+            "verify": t.verify,
+        }),
+    ))
+}
+
+fn parse_blocked_by_arg(raw: Option<&str>) -> Result<Vec<String>> {
+    let Some(value) = raw else {
+        return Ok(Vec::new());
+    };
+    let value = value.trim();
+    if value.is_empty() || value.eq_ignore_ascii_case("none") {
+        return Ok(Vec::new());
+    }
+    let ids = crate::work::parse_blockers(value);
+    if ids.is_empty() {
+        bail!("could not parse --blocked-by `{value}`");
+    }
+    Ok(ids)
 }
 
 pub fn list(g: &Global, a: &TicketsListArgs) -> Result<Out> {
