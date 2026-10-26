@@ -23,6 +23,7 @@ pub mod permissions;
 pub mod phase;
 pub mod pickup;
 pub mod plan_review;
+pub mod refine;
 pub mod render;
 pub mod report;
 pub mod state;

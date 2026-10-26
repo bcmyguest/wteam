@@ -10,6 +10,13 @@ require_cmd() {
   done
 }
 
+ensure_bench_wteam() {
+  ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+  cargo build --release -q --manifest-path "$ROOT/Cargo.toml"
+  export PATH="$ROOT/target/release:$PATH"
+  export WTEAM="$ROOT/target/release/wteam"
+}
+
 wteam_bin() {
   if [ -n "${WTEAM:-}" ]; then
     printf '%s\n' "$WTEAM"

@@ -9,6 +9,7 @@ PAIRS=${3:-2}
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/common.sh"
 require_cmd agent python3 cargo
+ensure_bench_wteam
 WTEAM=$(wteam_bin)
 MODEL=${WTEAM_BENCH_MODEL:-composer-2.5}
 WORKER_MODEL=${WTEAM_BENCH_WORKER_MODEL:-$MODEL}

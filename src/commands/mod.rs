@@ -7,6 +7,7 @@ pub mod mail;
 pub mod permissions;
 pub mod phase;
 pub mod pickup;
+pub mod refine;
 pub mod report;
 pub mod role;
 pub mod run;
@@ -88,6 +89,7 @@ pub fn run(g: &Global, cmd: &Command) -> Result<Out> {
         Command::Stop => stop::stop(g),
         Command::Restore => stop::restore(g),
         Command::Report => report::run(g),
+        Command::Refine(a) => refine::run(g, a),
         Command::Role(a) => role::run(g, a),
         Command::Graph(a) => graph::run(g, a),
         Command::Permissions(a) => permissions::run(g, a),

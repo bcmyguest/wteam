@@ -80,6 +80,8 @@ pub enum Command {
     Restore,
     /// Print the stop report.
     Report,
+    /// Analyze a stopped run: tokens, grade gaps, harness recommendations.
+    Refine(crate::commands::refine::RefineArgs),
     /// Print a resolved role prompt (project → config dir → built-in).
     Role(RoleArgs),
     /// Render the team or work graph as Mermaid.
