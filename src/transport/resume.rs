@@ -436,14 +436,46 @@ pub fn one_turn(
     foreground: bool,
 ) -> Result<String> {
     let (role, _) = parse_instance(agent);
-    let team = state::load(&ctx.paths)?.run.team;
-    let dirs = crate::config::search_dirs(&ctx.paths, &team);
-    let search = dirs.agents.clone();
     let agent_name = match ctx.team.roles.get(&role).map(|r| &r.kind) {
         Some(NodeKind::Agent { agent, .. }) => agent.clone(),
         _ => bail!("`{role}` is not an agent role in team `{}`", ctx.team.name),
     };
-    let def = agents::load(&agent_name, &search)?;
+    one_turn_def(
+        ctx,
+        agent,
+        &agent_name,
+        first,
+        session,
+        turn,
+        prompt,
+        foreground,
+        true,
+        None,
+    )
+}
+
+/// Like [`one_turn`], but loads agent definition `def_name` directly (no team role required).
+/// Used by Goldfish phases (plan-review, validate, …), who are not ticket-graph nodes.
+/// When `keep_session` is false, the session id is cleared after the turn so the next
+/// call is a fresh Goldfish context. `phase` sets `WTEAM_PHASE` for `phase-verdict`.
+#[allow(clippy::too_many_arguments)]
+pub fn one_turn_def(
+    ctx: &Ctx,
+    agent: &str,
+    def_name: &str,
+    first: bool,
+    session: Option<String>,
+    turn: u32,
+    prompt: &str,
+    foreground: bool,
+    keep_session: bool,
+    phase: Option<&str>,
+) -> Result<String> {
+    let (role, _) = parse_instance(agent);
+    let team = state::load(&ctx.paths)?.run.team;
+    let dirs = crate::config::search_dirs(&ctx.paths, &team);
+    let search = dirs.agents.clone();
+    let def = agents::load(def_name, &search)?;
     let adapter = adapters::for_cli(&def.cli)?;
     let cwd = turn_dir(ctx, agent)?;
     let permissions = if def.cli == "fake" {
@@ -457,7 +489,7 @@ pub fn one_turn(
     };
     let role_prompt = if first {
         Some(agents::role_prompt(
-            def.prompt.as_deref().unwrap_or(&role),
+            def.prompt.as_deref().unwrap_or(def_name),
             &search,
         )?)
     } else {
@@ -470,11 +502,17 @@ pub fn one_turn(
         prompt: prompt.to_string(),
         role_prompt,
         cwd: cwd.clone(),
-        env: vec![
-            ("WTEAM_ROOT".into(), ctx.paths.root.display().to_string()),
-            ("WTEAM_SLUG".into(), ctx.paths.slug.clone()),
-            ("WTEAM_AGENT".into(), agent.to_string()),
-        ],
+        env: {
+            let mut env = vec![
+                ("WTEAM_ROOT".into(), ctx.paths.root.display().to_string()),
+                ("WTEAM_SLUG".into(), ctx.paths.slug.clone()),
+                ("WTEAM_AGENT".into(), agent.to_string()),
+            ];
+            if let Some(p) = phase {
+                env.push(("WTEAM_PHASE".into(), p.to_string()));
+            }
+            env
+        },
         extra_args: def.extra_args.clone(),
         permissions,
     };
@@ -507,11 +545,15 @@ pub fn one_turn(
     });
     state::with_state(&ctx.paths, |s| {
         let st = s.agents.entry(agent.to_string()).or_default();
-        st.session_id = session_id;
+        st.session_id = if keep_session { session_id } else { None };
         st.context_tokens = tokens.or(st.context_tokens);
         st.tokens_total += tokens.unwrap_or(0);
         st.turns += 1;
-        st.session_turns += 1;
+        st.session_turns = if keep_session {
+            st.session_turns + 1
+        } else {
+            0
+        };
         Ok(())
     })?;
     Ok(out.text)

@@ -38,6 +38,12 @@ pub fn run(g: &Global, a: &RunArgs) -> Result<Out> {
     }
     // Settings first: `Ctx::load` resolves the team from them. `active` stays set until the
     // run ends by any path, so mail to the orchestrator waits for the watcher.
+    if !paths.plan_review_passed_file().is_file() {
+        eprintln!(
+            "warning: no plan-review PASSED stamp at {}; run `wteam plan-review` first (skill/benches gate on it)",
+            paths.plan_review_passed_file().display()
+        );
+    }
     state::with_state(&paths, |s| {
         s.run = RunSettings {
             pairs: a.pairs,

@@ -13,7 +13,7 @@ wteam: Portable worker/reviewer teams for coding agents (Claude Code, Codex, ope
 - `engine.rs` runs the ticket lifecycle (dispatch, submit, verdict, block). Mutate `state.json` only through `state::with_state`.
 - `mailbox.rs` is the append-only mail format: a marker line, headers, a blank line, then exactly `length` bytes. Parsers slice by length and never scan bodies.
 - `paths.rs` owns every path under `.wteam/`.
-- `adapters/` builds per-CLI commands (`claude`, `codex`, `opencode`, `pi`, `fake`). `cursor` is not implemented yet.
+- `adapters/` builds per-CLI commands (`claude`, `codex`, `cursor`/`agent`, `opencode`, `pi`, `fake`).
 - `permissions/` translates profiles per CLI. `team/` parses team DOT graphs.
 - `watcher.rs` is the `wteam run` loop (handoff, budget, stop reasons). `transport/resume.rs` holds self-healing: silent-turn re-prompt, retries.
 - `backup.rs` is implemented (used by `transport/resume.rs` writes, `stop` and `restore`). `worktree.rs` is a stub (`--isolation worktree`, ticket 14), as is `transport/herdr.rs`; `config` and `setup` (ticket 13) too: `bail!("not implemented…")`.

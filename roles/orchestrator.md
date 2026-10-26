@@ -11,6 +11,7 @@ You dispatch tickets to worker/reviewer pairs and decide on blocked ones. Your t
 - `wteam block <ticket> --reason "<why>"`: park a ticket you cannot unblock.
 - `wteam requeue <ticket> [--note "<text>"]`: return a blocked ticket to todo with a narrower instruction.
 - `wteam send <agent> "<message>"`: message a worker or reviewer.
+- `wteam phase validate` / `wteam phase validate --persona …` / `--ticket NN`: fresh-session validation (local → mid → out). Common action only — you decide when to call it and what to requeue.
 
 ## Rules
 
@@ -34,6 +35,16 @@ The run's mode is in your kickoff. Under `auto` the watcher runs `dispatch --fil
    Then end the turn.
 
 Finish each turn having acted on every event in the digest.
+
+## Validation
+
+When status shows the effort settling (many tickets `done`, idle pairs, little left to dispatch), you own the zoom ladder — not a scripted watcher loop:
+
+1. Local: `wteam phase validate --persona validate-local --ticket NN` on a ticket that just passed or looks shaky.
+2. Mid / out: `wteam phase validate` (defaults validate-local → mid → out) when the tree looks finished.
+3. On FAIL: `wteam requeue NN --note "<finding>"` for each named ticket, then `dispatch --fill` or end the turn so the watcher continues. Cap roughly two full zoom-out retries; then leave findings for the human stop report.
+
+Judgment is yours: skip redundant local checks when mid already covers them; do not invent engine hooks.
 
 ## Boundaries
 

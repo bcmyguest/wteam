@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/bcmyguest/wteam/actions/workflows/ci.yml/badge.svg)](https://github.com/bcmyguest/wteam/actions/workflows/ci.yml)
 
-Portable worker/reviewer teams for coding agents (Claude Code, Codex, opencode, Pi; Cursor permission profiles only, no runner yet).
+Portable worker/reviewer teams for coding agents (Claude Code, Codex, Cursor `agent`, opencode, Pi).
 
 wteam runs planned tickets through pairs of agents. A worker implements a
 ticket, a reviewer passes or fails it, and a passed ticket commits. Agents talk
@@ -13,7 +13,8 @@ through append-only mailboxes under `.wteam/`. Documentation site:
 
 ## Benchmark
 
-**Not wteam's target workload:** [Aider's polyglot benchmark](https://github.com/Aider-AI/polyglot-benchmark) is 34 small, independent exercises, scored here with **hidden tests**. wteam is built for large efforts with dependent tickets.
+wteam optimizes controlled parallel delivery and reviewable ownership, not minimum token cost.
+[Aider's polyglot benchmark](https://github.com/Aider-AI/polyglot-benchmark) (34 small independent exercises, **hidden tests**) is close to the worst case for that trade: one session often wins on dollars and pass rate.
 
 | Configuration | Passed | Wall time | Cost |
 |---|---|---|---|
@@ -22,10 +23,9 @@ through append-only mailboxes under `.wteam/`. Documentation site:
 | wteam, Haiku workers + Haiku reviewers | 20/34 | 334 s | $1.92 |
 | wteam, Haiku workers + Sonnet reviewers | 28/34 | 351 s | $12.23 |
 
-Small independent tasks favour a single session. A stronger reviewer lifts cheap workers, but at a cost.
-Full results, method and caveats: [benchmark page](https://bcmyguest.github.io/wteam/benchmark/) and `bench/polyglot/`.
+Measured wins on that suite: four pairs beat single Haiku on wall time at the same score; Sonnet reviewers raised Haiku workers to 28/34 (above single Sonnet). On larger same-test greenfield tasks, blind review preferred wteam’s structure. Full method, literature context, and caveats: [benchmark page](https://bcmyguest.github.io/wteam/benchmark/) and `bench/polyglot/`. Larger multi-ticket tables: `bench/results/2026-10-22.md`.
 
-Larger multi-ticket tasks (a Commit0 library rebuild and an 83 KB spec with 2,399 hidden tests) gave the same answer: single Haiku matched wteam at 2–10× lower cost. Both tasks hand the agent a precise spec, which is where a single session is strongest. Vague goals, brownfield changes and debugging are not benchmarked. Results: `bench/results/2026-10-22.md`.
+Fresh-context “Goldfish” phases (`wteam phase plan-review` / `wteam phase validate`) follow the same idea as Google’s [Elephant-Goldfish Model](https://github.com/google/elephant-goldfish-model) ([announcement](https://opensource.googleblog.com/2026/10/introducing-elephant-goldfish-model-plugin.html)): deep Elephant context (planner / orchestrator), then isolated critics on the artifact. New workflows are roles + a persona list; the CLI keeps stamps and restarts, not the loop brains.
 
 ## Install
 
@@ -73,6 +73,8 @@ Every command accepts `--json`. The full walkthrough is in the
 |---|---|
 | `init` | Create `.wteam/` and an effort directory |
 | `pickup` | Import planning output and verify it |
+| `phase`, `phase-verdict` | Generic Goldfish phase (presets: `plan-review`, `validate`; `--persona`) |
+| `plan-review`, `plan-verdict` | Aliases for `phase plan-review` / its verdict |
 | `status`, `ready` | Show tickets and agents; list ready tickets |
 | `dispatch`, `submit`, `verdict`, `block`, `requeue` | Move tickets through review |
 | `approve` | Pass a human gate |

@@ -1,0 +1,58 @@
+Brownfield comparison via Cursor agent CLI + Composer 2.5 (2026-10-26).
+
+Prior Codex arms under wteam-brownfield-{single,team} stopped on usage limit; superseded.
+
+Fresh arms:
+  /home/brandonguest/wteam-bf-single
+  /home/brandonguest/wteam-bf-team
+Logs:
+  /home/brandonguest/wteam-bf-single.logs
+  /home/brandonguest/wteam-bf-team.logs
+
+Default tuning (separate from this run): built-in reviewer model sonnet → opus
+(same-tier review does not lift accuracy; stronger reviewer does). No sampling/voting.
+
+Harness: cli=cursor (agent -p stream-json), model=composer-2.5, 2 pairs, auto dispatch.
+
+Plan-review arm (EGM Goldfish; do not re-run single/baseline wteam):
+  /home/brandonguest/wteam-bf-planreview
+  /home/brandonguest/wteam-bf-planreview.logs
+  script: run_wteam_planreview.sh
+  result (prior): plan-review PASSED attempt 3; all 5 tickets done; wall 1713s;
+          grade FAIL — 2 parallel fill tests.
+  result (2026-10-26 re-run with phase validate harness): plan-review FAILED after 3
+          attempts / 2 rewrites (wall 837s); never reached run/validate/grade.
+          Critic kept failing on fill queue semantics, watcher stop paths, Blocked by.
+  result (critic FAIL tightened + min rewrite; wall 1928s): plan-review PASS attempt 3;
+          all 4 tickets done; validate PASS attempt 1; grade FAIL — 2 parallel fill
+          tests (fill_error_midway…, fill_with_no_idle_pair…). Validate stamped green
+          while grade red — validate-out did not catch the same failures.
+
+Clarified-contract rerun (2026-10-26): task.md now names the `dispatched` JSON
+field required by the historical grader. Fresh Cursor Composer 2.5 arms, no
+manual changes to their output, two pairs in each team arm, same target tests.
+Runs: /tmp/wteam-brownfield-rerun.TmhQtl/{single,team,planreview}
+Logs: /tmp/wteam-brownfield-rerun.TmhQtl/{single,team,planreview}.logs
+
+Arm          Wall   Cursor turns   Tokens*     Hidden grade / format
+single       202s              1   1,248,525   3 target failures / fmt FAIL
+team         950s             18   8,299,254   2 target failures / fmt PASS
+planreview  1371s             15   8,761,393   3 target failures / fmt FAIL
+
+* Sum of Cursor result-event inputTokens, cacheReadTokens, cacheWriteTokens,
+  and outputTokens across planning, rewrite, worker, reviewer and validation
+  turns. This counts reported tokens, including cached input, not billed cost.
+  All result events had usage. Scripts now record this total and grade status.
+
+All three passed the bulk-dispatch target tests. All three failed the target
+role check for dropping the old exact wording `exactly one command per shell
+call`, and the watcher hint check for changing the old exact sentence. Single
+and planreview also failed the four-pair watcher liveness test: the run stopped
+with tickets 03–08 ready. Team passed that behavior test. Planreview passed
+plan review on attempt 1; its validate-out persona caught a rustfmt failure
+in tests/git_locks.rs. The harness did not repair it before grading.
+
+On this one task, planreview used more tokens and wall time than team while
+failing an additional behavior test and the format gate. Team's extra tokens
+relative to single accompanied one fewer behavior failure. One task cannot
+establish expected performance across brownfield work.

@@ -3,7 +3,7 @@ name: wteam
 description: Run a team of worker/reviewer pairs through a multi-ticket effort with wteam. Use when the user asks for wteam, a team, worker-reviewer pairs, parallel agents on tickets, or a multi-ticket build.
 ---
 
-Drive `wteam` through five steps. Finish each step's completion criterion before starting the next.
+Drive `wteam` through these steps. Finish each step's completion criterion before starting the next.
 
 ## 1. Intake
 
@@ -27,19 +27,41 @@ Otherwise spawn the planner with the prompt from `wteam role planner` (stdout; `
 
 Done when `wteam pickup --slug <slug>` exits 0 with no problems listed.
 
-## 3. Confirm
+## 3. Plan review (Goldfish)
+
+Before Confirm, stress-test the plan with **fresh-context** reviewers (same idea as Google’s [Elephant-Goldfish Model](https://github.com/google/elephant-goldfish-model): deep planner context, then isolated critics on the artifact).
+
+Default chain (override agent TOMLs under `.wteam/agents/` like any role):
+
+1. `spec-comprehension` — can a stranger reconstruct the plan from `spec.md` + tickets alone?
+2. `spec-critic` — edges, Verify/Files, needless serialisation, weeds
+3. `spec-readiness` — go/no-go for workers
+
+Run `wteam phase plan-review --slug <slug>` (alias: `wteam plan-review`). On FAIL: show findings, spawn the planner to rewrite with **minimum** edits (only what findings name; no scope expansion), `wteam pickup` again, re-run (cap two rewrite loops). On PASS, a stamp lands at `.wteam/<slug>/plan-reviews/PASSED.md`.
+
+Done when the phase exits 0.
+
+## 4. Confirm
 
 Show the `wteam pickup --slug <slug>` output and `wteam permissions --slug <slug>` for the team, then wait for the user.
 
 Done when the user says go.
 
-## 4. Run
+## 5. Run
 
 Run `wteam run --pairs N --slug <slug>`. It runs long: use a background task where the harness offers one, else the foreground. The watcher in `wteam run` waits and feeds the orchestrator; never call `wteam wait` yourself. Add `--budget-tokens <n>` when the user sets a token cap. `--dispatch auto` (the default) has the watcher dispatch ready tickets itself and wakes the orchestrator only for blocked tickets and human gates. `--dispatch model` has the orchestrator dispatch every ticket, as before.
 
+The orchestrator (Elephant) may call `wteam phase validate` while the run is live. That is judgment, not a watcher hook.
+
 Done when `wteam run` exits and prints the stop report.
 
-## 5. Relay
+## 6. Validate (backstop)
+
+If `.wteam/<slug>/phases/validate/PASSED.md` is missing after Run, run `wteam phase validate --slug <slug>` once (local → mid → out Goldfish). On FAIL: `wteam requeue NN --note "<finding>"` for named tickets, short `wteam run`, re-validate (cap two). The orchestrator should have done this already; the skill only backs it.
+
+Done when validate PASSED exists or the user accepts remaining findings.
+
+## 7. Relay
 
 Relay the stop report (`wteam report --slug <slug>` reprints it) with its stop reason and recommended actions. Ask how to proceed.
 

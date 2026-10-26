@@ -5,6 +5,7 @@ pub mod graph;
 pub mod init;
 pub mod mail;
 pub mod permissions;
+pub mod phase;
 pub mod pickup;
 pub mod report;
 pub mod role;
@@ -68,6 +69,10 @@ pub fn run(g: &Global, cmd: &Command) -> Result<Out> {
     match cmd {
         Command::Init => init::run(g),
         Command::Pickup(a) => pickup::run(g, a),
+        Command::Phase(a) => phase::phase(g, a),
+        Command::PhaseVerdict(a) => phase::phase_verdict(g, a),
+        Command::PlanReview(a) => phase::plan_review(g, a),
+        Command::PlanVerdict(a) => phase::plan_verdict(g, a),
         Command::Status => status::status(g),
         Command::Ready => status::ready(g),
         Command::Dispatch(a) => tickets::dispatch(g, a),

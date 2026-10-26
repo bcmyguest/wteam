@@ -33,11 +33,20 @@ pub struct AgentDef {
 }
 
 /// Built-in definitions: (name, model, profile), all on the `claude` CLI.
-const BUILTINS: [(&str, &str, &str); 4] = [
+/// Reviewer is one tier above worker: same-tier review adds cost without lifting
+/// hidden-test accuracy (see the benchmark page). Spec Goldfish use `plan`
+/// profile; critic/readiness sit above comprehension.
+const BUILTINS: [(&str, &str, &str); 10] = [
     ("planner", "opus", "plan"),
     ("orchestrator", "haiku", "control"),
     ("worker", "sonnet", "edit"),
-    ("reviewer", "sonnet", "review"),
+    ("reviewer", "opus", "review"),
+    ("spec-comprehension", "sonnet", "plan"),
+    ("spec-critic", "opus", "plan"),
+    ("spec-readiness", "opus", "plan"),
+    ("validate-local", "sonnet", "review"),
+    ("validate-mid", "opus", "review"),
+    ("validate-out", "opus", "review"),
 ];
 
 /// Find agent `name` in `search` dirs (first hit wins), else the built-ins.
@@ -73,6 +82,12 @@ fn builtin_role(name: &str) -> Option<&'static str> {
         "orchestrator" => include_str!("../../roles/orchestrator.md"),
         "worker" => include_str!("../../roles/worker.md"),
         "reviewer" => include_str!("../../roles/reviewer.md"),
+        "spec-comprehension" => include_str!("../../roles/spec-comprehension.md"),
+        "spec-critic" => include_str!("../../roles/spec-critic.md"),
+        "spec-readiness" => include_str!("../../roles/spec-readiness.md"),
+        "validate-local" => include_str!("../../roles/validate-local.md"),
+        "validate-mid" => include_str!("../../roles/validate-mid.md"),
+        "validate-out" => include_str!("../../roles/validate-out.md"),
         _ => return None,
     })
 }
@@ -109,6 +124,28 @@ mod tests {
         assert_eq!(w.cli, "claude");
         assert_eq!(w.model.as_deref(), Some("sonnet"));
         assert_eq!(w.profile.as_deref(), Some("edit"));
+        assert_eq!(
+            load("reviewer", &[]).unwrap().model.as_deref(),
+            Some("opus")
+        );
+        assert_eq!(
+            load("spec-critic", &[]).unwrap().profile.as_deref(),
+            Some("plan")
+        );
+        assert!(
+            role_prompt("spec-comprehension", &[])
+                .unwrap()
+                .contains("Fresh session")
+        );
+        assert_eq!(
+            load("validate-out", &[]).unwrap().model.as_deref(),
+            Some("opus")
+        );
+        assert!(
+            role_prompt("validate-local", &[])
+                .unwrap()
+                .contains("Fresh session")
+        );
         assert_eq!(
             load("orchestrator", &[]).unwrap().model.as_deref(),
             Some("haiku")

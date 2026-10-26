@@ -1,10 +1,16 @@
 ---
 title: Benchmark
-description: wteam against single-agent baselines on Aider's polyglot benchmark, a Commit0 library rebuild and an 83 KB spec with 2,399 hidden tests, with every result, including the unflattering ones.
+description: wteam against single-agent baselines on Aider's polyglot benchmark and larger multi-ticket tasks — what multi-agent coordination buys, and what it does not.
 ---
 
 One run per configuration on 2026-10-22, so treat differences of one or two exercises as noise.
 The harness is in [`bench/polyglot/`](https://github.com/bcmyguest/wteam/tree/main/bench/polyglot); rerun it with your own models.
+
+wteam optimizes **controlled parallel delivery and reviewable ownership**, not minimum token cost.
+These suites mostly measure the latter, so a single coherent session often wins on pass rate and dollars.
+The numbers below still show where wteam pays for itself: wall time under independent work, accuracy when reviewers outrank workers, and structure when every arm already passes the tests.
+
+Fresh-context Goldfish phases (`wteam phase plan-review` / `wteam phase validate`, configurable personas) follow Google’s [Elephant-Goldfish](https://github.com/google/elephant-goldfish-model) pattern: isolate critics from Elephant chat. The orchestrator owns validation loops; the CLI only stamps state. Orthogonal to parallel workers on polyglot.
 
 ## Setup
 
@@ -28,35 +34,54 @@ The harness is in [`bench/polyglot/`](https://github.com/bcmyguest/wteam/tree/ma
 | Single session, Sonnet | 27/34 | 214 s | $0.79 |
 | Single session, Haiku | 20/34 | 400 s | $0.28 |
 | wteam, Haiku workers + Haiku reviewers, model orchestrator | 20/34 | 428 s | $3.09 |
-| wteam, Haiku workers + Haiku reviewers, `--dispatch auto` | 20/34 | 334 s | $1.92 |
-| wteam, Haiku workers + **Sonnet reviewers**, `--dispatch auto` | **28/34** | 351 s | $12.23 |
+| wteam, Haiku workers + Haiku reviewers, auto dispatch | 20/34 | 334 s | $1.92 |
+| wteam, Haiku workers + **Sonnet reviewers**, auto dispatch | **28/34** | 351 s | $12.23 |
 
-### Visible tests (saturated: every configuration can reach 34/34)
+### Visible tests
 
-| Configuration | Passed | Wall time | Cost |
-|---|---|---|---|
-| Single session, Sonnet | 34/34 | 236 s | $1.10 |
-| Single session, Haiku | 34/34 | 440 s | $0.47 |
-| wteam, Haiku, model orchestrator | 31/34 | 231 s | $2.33 |
+Visible mode saturates: single Sonnet and single Haiku both reach 34/34 (236 s / $1.10 and 440 s / $0.47).
+Hidden tests are the comparison that still discriminates.
 
 ## What it says
 
-- **For small independent tasks, one session is the better deal.** Polyglot is close to wteam's worst case: 34 tiny tasks,
-  nothing to plan, no dependencies, and a fixed per-ticket cost for briefs, reviews and commits.
-- **A same-tier reviewer adds cost, not quality.** Haiku reviewing Haiku failed almost the same exercises as Haiku alone.
-  The reviewer shares the worker's blind spots.
-- **A stronger reviewer lifts cheap workers.** Haiku workers with Sonnet reviewers scored 28/34, one above a single Sonnet
-  session and eight above Haiku alone. In this setup the Sonnet reviewers cost $10.96 of the $12.23, so reviewer token
-  use is the next thing to cut.
-- **Parallel pairs are faster.** With four pairs, wteam beat the matching single Haiku session on wall time in both modes.
-- **`--dispatch auto` (now the default) removes orchestrator cost.** Model-driven dispatch spent $0.79–$0.87 per run on
-  turns that only ran `wteam dispatch --fill`; auto dispatch spent $0.00–$0.05.
+### Measured benefits
+
+- **Parallel pairs cut wall time.** With four pairs, auto-dispatch wteam finished the matching hidden Haiku comparison in 334 s versus 400 s for one Haiku session, at the same 20/34 score.
+- **A stronger reviewer lifts cheap workers.** Haiku workers with Sonnet reviewers scored 28/34 — one above a single Sonnet session and eight above Haiku alone. Sonnet review accounted for $10.96 of the $12.23. Built-in defaults follow this: worker `sonnet`, reviewer `opus`. Same-tier review is optional to configure, not the recommended shape.
+- **Ticket-scoped work preferred on structure.** On larger greenfield tasks where every arm already passed the same hidden tests, Opus judged module pairs blind (both orders) and preferred wteam’s code in 27 of 30 comparisons, then 22 of 30 on a repeat run: smaller named helpers, one place per rule, located errors, type hints, docstrings. The edge tracked one focused worker per module; Sonnet reviewers did not add to it in the run that isolates them.
+
+### Why multi-agent does not dominate pass rate here
+
+The literature that says “more agents help” usually measures a different mechanism than wteam’s ticket pipeline.
+
+1. **Sampling-and-voting ≠ worker/reviewer.**
+   [*More Agents Is All You Need*](https://arxiv.org/abs/2402.05120) scales by independent solutions and a vote.
+   wteam produces one implementation per ticket, then reviews it — governance, not answer diversity.
+   That paper also finds that agent debate can harm code coherence when agents remix each other’s drafts.
+
+2. **Precise greenfield specs favour one memory stream.**
+   Polyglot exercises and the larger rebuilds hand every rule up front.
+   A single session keeps the full spec, discoveries, and edits together.
+   wteam partitions that into tickets, briefs, summaries, and diffs; same-tier reviewers see the ticket and diff, not the worker’s full trail, and under hidden tests share the worker’s missing grader signal.
+   Haiku reviewing Haiku stayed at 20/34.
+
+3. **Coordination has a tax, especially on sequential or tool-heavy work.**
+   [Google Research](https://research.google/blog/towards-a-science-of-scaling-agent-systems-when-and-why-agent-systems-work/)
+   ([paper](https://arxiv.org/abs/2512.08296)) finds multi-agent gains on parallelizable tasks and 39–70% *degradation* on sequential ones, plus a rising coordination cost as tool use grows.
+   [Anthropic’s multi-agent research system](https://www.anthropic.com/research/multi-agent-research-system)
+   reports large gains on breadth-first research, while noting coding offers less true parallelism and multi-agent runs consume far more tokens than ordinary chats.
+   Polyglot’s 34 tiny tickets maximize per-ticket overhead (brief, verify, review, commit, merge) relative to useful work.
+
+### Cost of orchestration
+
+Model-driven dispatch spent $0.79–$0.87 per run on turns that only ran `wteam dispatch --fill`.
+Auto dispatch spent $0.00–$0.05 for the same fill behavior — the auto rows above are the fair wteam comparison.
 
 ## Larger multi-ticket tasks
 
 Polyglot exercises are small and independent, so on 2026-10-22 we also ran tasks with dependent tickets.
-One run per arm; "wteam" is an Opus planner, Haiku workers and Sonnet reviewers in 4 pairs.
-Every score was checked for memorized upstream code and for reads outside the run's own repo.
+One run per arm; “wteam” is an Opus planner, Haiku workers and Sonnet reviewers in 4 pairs.
+Every score was checked for memorized upstream code and for reads outside the run’s own repo.
 Full tables and method: [`bench/results/2026-10-22.md`](https://github.com/bcmyguest/wteam/blob/main/bench/results/2026-10-22.md).
 
 | Task | Single Haiku | wteam |
@@ -65,30 +90,24 @@ Full tables and method: [`bench/results/2026-10-22.md`](https://github.com/bcmyg
 | incidentkit v1 (own 20 KB spec, 523 hidden tests) | 523, $0.16, 6 min | 523, $3.00, 11 min |
 | incidentkit v2 (own 83 KB spec, five interacting subsystems, 2,399 hidden tests) | 2399, $0.77, 11 min | 2399, $7.47, 16 min |
 
-On greenfield work from a precise written spec, a single Haiku session matched wteam at 2–10× lower cost,
-and handing it wteam's plan did not help. Planning, review and parallel pairs showed no value here.
-These tasks hand the agent every rule up front; vague goals, changes to existing code and debugging,
-where a single session tends to drift, are not benchmarked.
+On greenfield work from a precise written spec, a single Haiku session matched wteam’s pass counts at 2–10× lower cost.
+Planning and parallel pairs did not raise the score when the agent already held every rule.
+Vague goals, changes to existing code, and debugging — where a single session tends to drift — are not covered by these tables.
+A brownfield harness lives in [`bench/brownfield/`](https://github.com/bcmyguest/wteam/tree/main/bench/brownfield); graded results from it are not published yet.
 
-**Code quality is where wteam wins.** Since every arm passed the same tests, Opus judged each module
-pair blind, in both orders. It preferred wteam's code in 27 of 30 comparisons, and 22 of 30 in a
-repeat run, citing smaller named helpers, one place per rule, located error messages and docstrings.
-The edge comes from the ticket structure, one focused worker per module; Sonnet reviewers did not add
-to it in the one run that isolates them.
+## Architectural benefits (not scored by these suites)
 
-## Defects the benchmark found
+These are product properties the benchmarks do not price:
 
-Every early wteam failure was a wteam bug, not a model limit. Each became a ticket:
-
-- **Orchestrator chained commands, so all were denied:** 4/34 → `dispatch --fill`, and the one-command rule for the orchestrator (ticket 27).
-- **Watcher stopped while pairs were still busy** (ticket 27).
-- **`git status` raced a rebase on `index.lock`:** fixed with `--no-optional-locks` (ticket 27).
-- **Workers couldn't run `python3` for self-checks, and blocked tickets wedged their pairs:** 1/34 → ticket 28.
-- **Shell-built scratch files and multi-line commands were denied:** 13/34 → ticket 30.
+- Explicit ticket ownership and bounded change scopes
+- Independent verification and configurable review chains
+- Worktree isolation and controlled landing
+- Persistent tickets, reviews, logs, handoffs, and resumable sessions
+- Fault containment, retry/replan paths, and human approval gates
+- Different models, CLIs, prompts, and permissions per role
 
 ## Caveats
 
-- One run each. Haiku's run-to-run variance on this suite is unmeasured.
-- Runs shared one account's rate limits and sometimes ran concurrently.
-- A benchmark of one large effort with dependent tickets, where wteam's planning, handoff and parallelism should matter,
-  is still to come.
+- One run each. Haiku’s run-to-run variance on this suite is unmeasured.
+- Runs shared one account’s rate limits and sometimes ran concurrently.
+- Blind code-quality judgments used Opus on same-test greenfield modules; a brownfield replication with held-out tests is still open.

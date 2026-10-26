@@ -42,6 +42,14 @@ pub enum Command {
     Init,
     /// Import planning material and verify it before a run.
     Pickup(PickupArgs),
+    /// Run a Goldfish phase (persona chain; presets: plan-review, validate).
+    Phase(PhaseArgs),
+    /// Record a Goldfish phase verdict (requires WTEAM_AGENT / WTEAM_PHASE).
+    PhaseVerdict(PhaseVerdictArgs),
+    /// Alias: `wteam phase plan-review`.
+    PlanReview(PlanReviewArgs),
+    /// Alias: `wteam phase-verdict` for the plan-review phase.
+    PlanVerdict(PlanVerdictArgs),
     /// Tickets, agents and pending events.
     Status,
     /// Tickets whose blockers are done.
@@ -93,6 +101,53 @@ pub struct PickupArgs {
     /// Directory written by /to-tickets (`.scratch/<slug>`); omit to verify `.wteam/<slug>` in place.
     #[arg(long)]
     pub from: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct PhaseArgs {
+    /// Phase name: built-in presets `plan-review` and `validate`, or any name with `--persona`.
+    pub name: String,
+    /// Goldfish agent def / role names, in order (default: preset chain for known names).
+    #[arg(long = "persona")]
+    pub persona: Vec<String>,
+    /// Optional ticket id (validate zoom-local hint).
+    #[arg(long)]
+    pub ticket: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PhaseVerdictArgs {
+    pub verdict: VerdictValue,
+    /// Phase name (default: `WTEAM_PHASE` from `wteam phase`).
+    #[arg(long)]
+    pub phase: Option<String>,
+    /// Blocking problem (FAIL only); repeatable.
+    #[arg(long = "finding")]
+    pub findings: Vec<String>,
+    /// Non-blocking note; repeatable.
+    #[arg(long = "note")]
+    pub notes: Vec<String>,
+    /// File with `FINDINGS:` / `NOTES:` sections of `- ` bullets; merged with the flags.
+    #[arg(long = "file")]
+    pub file: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct PlanReviewArgs {
+    /// Goldfish agent def / role names, in order (default: built-in spec-* chain).
+    #[arg(long = "persona")]
+    pub persona: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PlanVerdictArgs {
+    pub verdict: VerdictValue,
+    #[arg(long = "finding")]
+    pub findings: Vec<String>,
+    #[arg(long = "note")]
+    pub notes: Vec<String>,
+    #[arg(long = "file")]
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

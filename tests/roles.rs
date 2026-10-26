@@ -43,6 +43,7 @@ fn orchestrator_names_its_commands() {
             "--reason",
             "wteam send",
             "wteam requeue",
+            "wteam phase validate",
         ],
     );
 }
@@ -298,6 +299,8 @@ fn skill_names_each_step_command() {
     let md = std::fs::read_to_string(root().join("skills/wteam/SKILL.md")).unwrap();
     for n in [
         "wteam pickup --from",
+        "wteam plan-review",
+        "wteam phase validate",
         "wteam permissions",
         "wteam run --pairs",
         "--slug <slug>",

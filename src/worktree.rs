@@ -32,7 +32,12 @@ pub fn git_literal(dir: &Path, args: &[&str]) -> Result<String> {
 
 fn run(dir: &Path, args: &[&str], literal: bool) -> Result<String> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(dir).args(args);
+    // Agents commit in throwaway repos that inherit a user's `commit.gpgsign`;
+    // signing has no secret key there and would block every PASS landing.
+    cmd.arg("-C")
+        .arg(dir)
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args);
     if literal {
         cmd.env("GIT_LITERAL_PATHSPECS", "1");
     }

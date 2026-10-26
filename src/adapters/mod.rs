@@ -3,6 +3,7 @@
 
 pub mod claude;
 pub mod codex;
+pub mod cursor;
 pub mod fake;
 pub mod opencode;
 pub mod pi;
@@ -69,12 +70,10 @@ pub fn for_cli(cli: &str) -> Result<Box<dyn Adapter>> {
     Ok(match cli {
         "claude" => Box::new(claude::Claude),
         "codex" => Box::new(codex::Codex),
+        "cursor" => Box::new(cursor::Cursor),
         "opencode" => Box::new(opencode::Opencode),
         "pi" => Box::new(pi::Pi),
         "fake" => Box::new(fake::Fake),
-        "cursor" => bail!(
-            "the cursor adapter is not implemented yet (second wave); its permissions translate"
-        ),
         other => {
             bail!(
                 "unknown agent cli `{other}` (expected claude, codex, opencode, pi, cursor or fake)"

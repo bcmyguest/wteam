@@ -48,6 +48,35 @@ impl Paths {
     pub fn reviews_dir(&self) -> PathBuf {
         self.effort_dir().join("reviews")
     }
+    /// Relative path of a Goldfish phase dir under the effort (stable for prompts).
+    pub fn phase_rel(&self, phase: &str) -> String {
+        if phase == "plan-review" {
+            "plan-reviews".into()
+        } else {
+            format!("phases/{phase}")
+        }
+    }
+    /// Goldfish phase artifacts: pending verdict, per-persona reports, PASSED stamp.
+    /// `plan-review` keeps the historical `plan-reviews/` path; others use `phases/<name>/`.
+    pub fn phase_dir(&self, phase: &str) -> PathBuf {
+        self.effort_dir().join(self.phase_rel(phase))
+    }
+    pub fn phase_passed_file(&self, phase: &str) -> PathBuf {
+        self.phase_dir(phase).join("PASSED.md")
+    }
+    pub fn phase_pending_file(&self, phase: &str) -> PathBuf {
+        self.phase_dir(phase).join("pending.json")
+    }
+    /// Alias for the plan-review phase stamp (skill / run warning).
+    pub fn plan_reviews_dir(&self) -> PathBuf {
+        self.phase_dir("plan-review")
+    }
+    pub fn plan_review_passed_file(&self) -> PathBuf {
+        self.phase_passed_file("plan-review")
+    }
+    pub fn plan_review_pending_file(&self) -> PathBuf {
+        self.phase_pending_file("plan-review")
+    }
     pub fn queue_file(&self) -> PathBuf {
         self.effort_dir().join("queue.md")
     }
@@ -101,6 +130,7 @@ pub fn init_effort(paths: &Paths) -> Result<()> {
         paths.tickets_dir(),
         paths.mail_dir(),
         paths.reviews_dir(),
+        paths.plan_reviews_dir(),
         paths.handoffs_dir(),
         paths.logs_dir(),
     ] {
