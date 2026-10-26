@@ -7,10 +7,13 @@ OUT=$1
 LOGS=$2
 PAIRS=${3:-2}
 HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/common.sh"
+require_cmd agent python3 cargo
+WTEAM=$(wteam_bin)
 MODEL=${WTEAM_BENCH_MODEL:-composer-2.5}
-# Override the reviewer model separately when testing model-tier effects.
 WORKER_MODEL=${WTEAM_BENCH_WORKER_MODEL:-$MODEL}
 REVIEWER_MODEL=${WTEAM_BENCH_REVIEWER_MODEL:-$MODEL}
+RUN_TIMEOUT=${RUN_TIMEOUT:-1800}
 
 sh "$HERE/prepare.sh" "$OUT" wteam
 rm -rf "$LOGS"
@@ -25,13 +28,12 @@ for ROLE in planner orchestrator worker reviewer; do
     worker) PROFILE=edit; ROLE_MODEL=$WORKER_MODEL ;;
     reviewer) PROFILE=review; ROLE_MODEL=$REVIEWER_MODEL ;;
   esac
-  # --force keeps headless turns off permission prompts; profiles still write cli.json.
   printf 'name = "%s"\ncli = "cursor"\nmodel = "%s"\nprompt = "%s"\nprofile = "%s"\nextra_args = ["--force"]\n' \
     "$ROLE" "$ROLE_MODEL" "$ROLE" "$PROFILE" >"$OUT/.wteam/agents/$ROLE.toml"
 done
 
 GOAL=$(cat "$HERE/task.md")
-PLAN_PROMPT="$(wteam --root "$OUT" --slug bench role planner)
+PLAN_PROMPT="$("$WTEAM" --root "$OUT" --slug bench role planner)
 
 Goal:
 $GOAL
@@ -39,14 +41,16 @@ $GOAL
 Slug: bench
 Write the spec and 2-6 implementation tickets under .wteam/bench/. Use the existing code and tests for Context and Verify. Finish only after wteam --slug bench pickup reports no problems."
 START=$(date +%s)
-agent -p --output-format stream-json --trust --force \
+timeout "$((RUN_TIMEOUT + 600))" agent -p --output-format stream-json --trust --force \
   --model "$MODEL" --workspace "$OUT" "$PLAN_PROMPT" \
   >"$LOGS/plan.jsonl" 2>"$LOGS/plan.stderr.log"
-wteam --root "$OUT" --slug bench pickup >"$LOGS/pickup.txt"
-wteam --root "$OUT" --slug bench run --pairs "$PAIRS" --dispatch auto --replan --timeout 1800 --max-turns 200 >"$LOGS/run.txt" 2>&1
+"$WTEAM" --root "$OUT" --slug bench pickup >"$LOGS/pickup.txt"
+timeout "$((RUN_TIMEOUT + 600))" "$WTEAM" --root "$OUT" --slug bench run --pairs "$PAIRS" --dispatch auto --replan --timeout "$RUN_TIMEOUT" --max-turns 200 \
+  >"$LOGS/run.txt" 2>&1
 END=$(date +%s)
 echo "wall_seconds $((END - START))" >"$LOGS/metrics.txt"
 python3 "$HERE/token_usage.py" "$LOGS" "$OUT/.wteam/bench/logs" >>"$LOGS/metrics.txt"
+finish_metrics "$LOGS" "$OUT" "$HERE"
 if sh "$HERE/grade.sh" "$OUT" >"$LOGS/grade.txt" 2>&1; then
   echo "grade_pass 1" >>"$LOGS/metrics.txt"
   tail -n 5 "$LOGS/grade.txt"

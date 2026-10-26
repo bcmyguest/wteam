@@ -56,3 +56,25 @@ On this one task, planreview used more tokens and wall time than team while
 failing an additional behavior test and the format gate. Team's extra tokens
 relative to single accompanied one fewer behavior failure. One task cannot
 establish expected performance across brownfield work.
+
+Harness fixes (2026-10-26, commit0-style):
+- Fail fast: require agent/cargo/python3; resolve wteam via PATH or target/release.
+- RUN_TIMEOUT on plan/run agent turns (default 1800s).
+- audit.sh: leak suspects (grader commits, git history, other /tmp runs).
+- Hidden gate wired into wteam prepare: validate-out runs grade.sh, not checkout tests.
+- planreview validate loop: removed dead retry branch that stamped fail without requeue.
+
+Root causes (measurement vs product):
+1. validate-out used in-repo cargo test; grader swaps tests/ to e8d709d → false PASS.
+2. Semantic grader adaptations apply only at grade time; older runs without them looked
+   like "prompt copying" failures.
+3. Agent implementation gaps (fill JSON edge cases, watcher liveness at 4 pairs) are
+   real task failures, not harness bugs.
+4. fmt drift in agent-edited tests (e.g. git_locks.rs) is agent/harness hygiene; gate
+   correctly fails fmt before tests.
+
+Framework follow-ups (not all implemented here):
+- Spec Verify / phase validate: optional project gate command (e.g. hidden_gate.sh).
+- Orchestrator validate loop: requeue + short run belongs in role/skill; harness
+  should not pretend to requeue on validate FAIL without an Elephant turn.
+- Brownfield task could name JSON/error semantics in one place to reduce planner drift.

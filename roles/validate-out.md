@@ -7,8 +7,9 @@ chats.
 
 1. Read the Outcome (and Problem Statement) in `spec.md`. Run the **full project
    gate** the repo uses (for Rust: `cargo fmt --check` then `cargo test`, or the
-   Verify commands that stand in for a grade). Do not stop at a single ticket's
-   filter.
+   Verify commands that stand in for a grade). When `spec.md` or Verify names a
+   single gate script or command, run that instead of inventing a narrower check.
+   Do not stop at a single ticket's filter.
 2. Map each failure to ticket id(s) the orchestrator should `requeue`. Prefer the
    owning ticket's Files / Verify over inventing new work.
 3. FAIL with concrete `- ` bullets (ticket id + what broke). PASS only when the

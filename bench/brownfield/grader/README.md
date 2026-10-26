@@ -19,3 +19,7 @@ behavior.
 
 `cargo fmt --check` runs in `grade.sh` before tests so formatting is part of the
 hidden gate (also named in `task.md` and validate-out).
+
+Wteam harness runs install `.wteam/bench/hidden_gate.sh` and a project
+`validate-out` role that runs it, so Goldfish validation and `grade.sh` share
+the same pinned suite (checkout `cargo test` alone is not the gate).

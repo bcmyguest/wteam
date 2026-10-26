@@ -6,7 +6,10 @@ set -eu
 BASE=ba759a4
 OUT=$1
 MODE=${2:-}
-ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
+
+. "$HERE/common.sh"
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -21,6 +24,8 @@ git config tag.gpgsign false
 git add -A
 git commit -qm "chore: brownfield benchmark base"
 if [ "$MODE" = wteam ]; then
-  wteam --slug bench init >/dev/null
+  WTEAM=$(wteam_bin)
+  "$WTEAM" --slug bench init >/dev/null
+  install_bench_gate "$OUT" "$HERE"
 fi
 echo "$OUT: brownfield base $BASE ready"

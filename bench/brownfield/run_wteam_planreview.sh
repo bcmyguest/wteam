@@ -7,13 +7,16 @@ OUT=$1
 LOGS=$2
 PAIRS=${3:-2}
 HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/common.sh"
+require_cmd agent python3 cargo
+WTEAM=$(wteam_bin)
 MODEL=${WTEAM_BENCH_MODEL:-composer-2.5}
 WORKER_MODEL=${WTEAM_BENCH_WORKER_MODEL:-$MODEL}
 REVIEWER_MODEL=${WTEAM_BENCH_REVIEWER_MODEL:-$MODEL}
-# Critic/readiness above comprehension (matches built-in tiers).
 SPEC_LIGHT=${WTEAM_BENCH_SPEC_LIGHT_MODEL:-$MODEL}
 SPEC_HEAVY=${WTEAM_BENCH_SPEC_HEAVY_MODEL:-$MODEL}
 REWRITE_CAP=${WTEAM_BENCH_PLAN_REWRITE_CAP:-3}
+RUN_TIMEOUT=${RUN_TIMEOUT:-1800}
 
 sh "$HERE/prepare.sh" "$OUT" wteam
 rm -rf "$LOGS"
@@ -35,7 +38,7 @@ write_agent spec-critic plan "$SPEC_HEAVY"
 write_agent spec-readiness plan "$SPEC_HEAVY"
 
 GOAL=$(cat "$HERE/task.md")
-PLAN_PROMPT="$(wteam --root "$OUT" --slug bench role planner)
+PLAN_PROMPT="$("$WTEAM" --root "$OUT" --slug bench role planner)
 
 Goal:
 $GOAL
@@ -43,17 +46,16 @@ $GOAL
 Slug: bench
 Write the spec and 2-6 implementation tickets under .wteam/bench/. Use the existing code and tests for Context and Verify. Finish only after wteam --slug bench pickup reports no problems."
 START=$(date +%s)
-agent -p --output-format stream-json --trust --force \
+timeout "$((RUN_TIMEOUT + 600))" agent -p --output-format stream-json --trust --force \
   --model "$MODEL" --workspace "$OUT" "$PLAN_PROMPT" \
   >"$LOGS/plan.jsonl" 2>"$LOGS/plan.stderr.log"
-wteam --root "$OUT" --slug bench pickup >"$LOGS/pickup.txt"
+"$WTEAM" --root "$OUT" --slug bench pickup >"$LOGS/pickup.txt"
 
-# Goldfish: fresh-context personas; planner rewrite loops on FAIL (skill cap).
 i=0
 while true; do
   i=$((i + 1))
-  wteam --root "$OUT" --slug bench restore >/dev/null 2>&1 || true
-  if wteam --root "$OUT" --slug bench plan-review >"$LOGS/plan-review.$i.txt" 2>&1; then
+  "$WTEAM" --root "$OUT" --slug bench restore >/dev/null 2>&1 || true
+  if "$WTEAM" --root "$OUT" --slug bench plan-review >"$LOGS/plan-review.$i.txt" 2>&1; then
     echo "plan_review_pass_attempt $i" >>"$LOGS/metrics.txt"
     break
   fi
@@ -66,7 +68,7 @@ while true; do
     exit 1
   fi
   FINDINGS=$(cat "$LOGS/plan-review.$i.txt")
-  REWRITE_PROMPT="$(wteam --root "$OUT" --slug bench role planner)
+  REWRITE_PROMPT="$("$WTEAM" --root "$OUT" --slug bench role planner)
 
 Slug: bench
 Plan-review FAILED. Apply the **minimum** edit to clear the FINDINGS below.
@@ -79,56 +81,46 @@ Then run wteam --slug bench pickup until clean.
 
 Findings:
 $FINDINGS"
-  agent -p --output-format stream-json --trust --force \
+  timeout "$((RUN_TIMEOUT + 600))" agent -p --output-format stream-json --trust --force \
     --model "$MODEL" --workspace "$OUT" "$REWRITE_PROMPT" \
     >"$LOGS/rewrite.$i.jsonl" 2>"$LOGS/rewrite.$i.stderr.log"
-  wteam --root "$OUT" --slug bench restore >/dev/null 2>&1 || true
-  wteam --root "$OUT" --slug bench pickup >"$LOGS/pickup.after-rewrite.$i.txt" 2>&1 || true
+  "$WTEAM" --root "$OUT" --slug bench restore >/dev/null 2>&1 || true
+  "$WTEAM" --root "$OUT" --slug bench pickup >"$LOGS/pickup.after-rewrite.$i.txt" 2>&1 || true
 done
 
-wteam --root "$OUT" --slug bench run --pairs "$PAIRS" --dispatch auto --replan --timeout 1800 --max-turns 200 >"$LOGS/run.txt" 2>&1
+timeout "$((RUN_TIMEOUT + 600))" "$WTEAM" --root "$OUT" --slug bench run --pairs "$PAIRS" --dispatch auto --replan --timeout "$RUN_TIMEOUT" --max-turns 200 \
+  >"$LOGS/run.txt" 2>&1
 
-# Backstop if the orchestrator skipped zoom-out validation.
 write_agent validate-local review "$SPEC_LIGHT"
 write_agent validate-mid review "$SPEC_HEAVY"
 write_agent validate-out review "$SPEC_HEAVY"
-vi=0
-VALIDATION_OK=1
-while true; do
-  vi=$((vi + 1))
-  wteam --root "$OUT" --slug bench restore >/dev/null 2>&1 || true
-  if wteam --root "$OUT" --slug bench phase validate >"$LOGS/validate.$vi.txt" 2>&1; then
-    echo "validate_pass_attempt $vi" >>"$LOGS/metrics.txt"
-    break
-  fi
-  if [ "$vi" -gt "$REWRITE_CAP" ]; then
-    echo "validate_failed_after $vi" >>"$LOGS/metrics.txt"
-    VALIDATION_OK=0
-    break
-  fi
-  # Orchestrator-shaped backstop: requeue is judgment; harness only retries once the phase fails.
-  echo "validate attempt $vi failed; see $LOGS/validate.$vi.txt" >>"$LOGS/metrics.txt"
-  VALIDATION_OK=0
-  break
-done
+"$WTEAM" --root "$OUT" --slug bench restore >/dev/null 2>&1 || true
+VALIDATION_OK=0
+if "$WTEAM" --root "$OUT" --slug bench phase validate >"$LOGS/validate.1.txt" 2>&1; then
+  echo "validate_pass_attempt 1" >>"$LOGS/metrics.txt"
+  VALIDATION_OK=1
+else
+  echo "validate_failed_attempt 1" >>"$LOGS/metrics.txt"
+fi
 
 END=$(date +%s)
 echo "wall_seconds $((END - START))" >>"$LOGS/metrics.txt"
 python3 "$HERE/token_usage.py" "$LOGS" "$OUT/.wteam/bench/logs" >>"$LOGS/metrics.txt"
-GRADE_OK=1
+finish_metrics "$LOGS" "$OUT" "$HERE"
+GRADE_OK=0
 if sh "$HERE/grade.sh" "$OUT" >"$LOGS/grade.txt" 2>&1; then
   echo "grade_pass 1" >>"$LOGS/metrics.txt"
+  GRADE_OK=1
   tail -n 5 "$LOGS/grade.txt"
 else
   echo "grade_pass 0" >>"$LOGS/metrics.txt"
-  GRADE_OK=0
   tail -n 12 "$LOGS/grade.txt"
 fi
-if [ "$VALIDATION_OK" -ne 1 ]; then
-  echo "validation_pass 0" >>"$LOGS/metrics.txt"
-  echo "validation failed; see $LOGS/validate.$vi.txt" >&2
-else
+if [ "$VALIDATION_OK" -eq 1 ]; then
   echo "validation_pass 1" >>"$LOGS/metrics.txt"
+else
+  echo "validation_pass 0" >>"$LOGS/metrics.txt"
+  echo "validation failed; see $LOGS/validate.1.txt" >&2
 fi
 if [ "$GRADE_OK" -ne 1 ] || [ "$VALIDATION_OK" -ne 1 ]; then
   exit 1
