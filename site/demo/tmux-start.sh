@@ -9,7 +9,7 @@ export WTEAM_DEMO_PATH="/opt/wteam:${PATH}"
 
 tmux split-window -d -v -p 30 -- bash
 tmux send-keys -t 1 "export PATH=/opt/wteam:\$PATH WTEAM_DEMO_ROOT=/tmp/wteam-demo WTEAM_DEMO_PATH=/opt/wteam:\$PATH" Enter
-tmux send-keys -t 1 "while true; do sh dashboard.sh; sleep 0.5; done" Enter
+tmux send-keys -t 1 "sh dashboard.sh" Enter
 tmux select-pane -t 0
 tmux set-option pane-border-status top
 tmux set-window-option pane-border-format ' #{pane_index} #{pane_title}'
