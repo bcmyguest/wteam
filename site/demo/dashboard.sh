@@ -25,7 +25,7 @@ while true; do
   dash_line '\033[1;36m wteam\033[0m \033[2m· agents\033[0m'
   dash_line '\033[2m────────────────────────────────────────\033[0m'
 
-  wteam --slug "$SLUG" status 2>/dev/null | awk '
+  wteam --slug "$SLUG" tickets list 2>/dev/null | awk '
   /^[0-9][0-9]  / {
     id = $1
     st = "todo"
@@ -34,12 +34,11 @@ while true; do
     }
     title = $0
     sub(/^[^ ]+  /, "", title)
-    agent = ""
-    if (match($0, /  [a-z]+\.[0-9]+ *$/)) {
-      agent = substr($0, RSTART + 2, RLENGTH - 2)
-      sub(/  [a-z]+\.[0-9]+ *$/, "", title)
-    }
     sub(/  \[[^]]+\].*/, "", title)
+    agent = ""
+    if (match($0, /assignee=[^ ]+/)) {
+      agent = substr($0, RSTART + 10, RLENGTH - 10)
+    }
     icon = "○"
     if (st == "doing") icon = "◉"
     else if (st == "review") icon = "◎"
@@ -51,15 +50,18 @@ while true; do
       printf " %s  %-3s  %-12s  [%s]", icon, id, title, st
     }
     print ""
-    next
   }
+  ' | while IFS= read -r row; do
+    dash_line "$row"
+  done
+
+  wteam --slug "$SLUG" status 2>/dev/null | awk '
   /^agents:/ { agents = 1; next }
   agents && /^  / {
     name = $1; run = $2;
     mark = (run == "busy") ? "▸" : " "
     printf " %s \033[1m%-14s\033[0m %s", mark, name, run
     print ""
-    next
   }
   ' | while IFS= read -r row; do
     dash_line "$row"

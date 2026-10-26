@@ -30,7 +30,7 @@ Show
 Type "# greet CLI: ticket 01 kicks off the feature"
 Enter
 Sleep 500ms
-Type "sed -n '1,6p' .wteam/demo/tickets/01-tracer-bullet.md"
+Type "wteam --slug demo tickets list"
 Enter
 Sleep 2.5s
 Type "wteam --slug demo run --pairs 2"
