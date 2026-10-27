@@ -71,10 +71,16 @@ deny      Read(**/.env)      ✔       ✘ read denies are not enforced; the san
   specific paths: the sandbox can read everything, so `Read(**/.env)` is ✘.
   `.wteam/` is a writable root, so `wteam` calls can update state.
 - **Cursor** has no `ask` decision, so `ask` becomes a deny (≈).
-- **Claude Code and opencode** take these rules directly (✔).
+- **Claude Code and opencode** take these rules directly (✔). OpenCode `full`
+  adds `--auto`; other profiles set `OPENCODE_PERMISSION` JSON in the environment.
 - **pi** runs tools unrestricted, so every rule is ✘. Run pi agents inside a sandbox.
+  Pi is **experimental**; wteam does not map profile rules to Pi flags.
 
-The `full` profile sets bypass on every CLI and enforces nothing.
+The `full` profile sets bypass on every CLI (OpenCode: `--auto`; Pi: no extra
+flags, still unrestricted). It enforces nothing beyond what each CLI does by default.
+
+Run `wteam permissions --cli pi` to print the Pi column; the default table shows
+claude, codex, opencode and cursor only.
 
 ## Extending a profile
 

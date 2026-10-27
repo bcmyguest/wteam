@@ -21,8 +21,8 @@ Otherwise spawn the planner with the prompt from `wteam role planner` (stdout; `
 
 - Claude Code: spawn a subagent whose prompt is the role prompt.
 - Codex: `codex exec -m <model> "<role prompt>"`.
-- opencode: `opencode run -m <provider/model> "<role prompt>"`.
-- pi: `pi --mode json --model <model> -- "<role prompt>"`. The `--` keeps a prompt that starts with `-` from parsing as a flag (see `src/adapters/pi.rs`).
+- opencode: `opencode run --format json -m <provider/model> "<role prompt>"` (wteam prepends the role on the first turn instead). Profiles map to `OPENCODE_PERMISSION`; `full` adds `--auto`.
+- pi: **experimental** — run in a sandbox; wteam cannot enforce profiles. `pi --mode json --model <model> -- "<role prompt>"`. The `--` keeps a prompt that starts with `-` from parsing as a flag (see `src/adapters/pi.rs`).
 - Any other harness: follow the role prompt in-session.
 
 Done when `wteam pickup --slug <slug>` exits 0 with no problems listed.

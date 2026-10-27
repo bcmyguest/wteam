@@ -95,6 +95,51 @@ Planning and parallel pairs did not raise the score when the agent already held 
 Vague goals, changes to existing code, and debugging — where a single session tends to drift — are not covered by these tables.
 A brownfield harness lives in [`bench/brownfield/`](https://github.com/bcmyguest/wteam/tree/main/bench/brownfield); graded results from it are not published yet.
 
+## Configurable runner (Commit0-style)
+
+[`bench/commit0/`](https://github.com/bcmyguest/wteam/tree/main/bench/commit0) remains the published **Claude Code** harness (fixed CLI and scripts).
+[`bench/runner/`](https://github.com/bcmyguest/wteam/tree/main/bench/runner) is **CLI-agnostic**: the same hidden-pytest tasks and three **context** arms on one agent configuration.
+
+| Mode | Context | What it measures |
+|---|---|---|
+| **continuous** | One session, full goal | Single long chat (optional saved `PLAN=` in the same session) |
+| **fresh** | New session per ticket | Same model/cli, no resume between tickets |
+| **team** | wteam pairs | Planner → pickup → `wteam run` (same layout as commit0 wteam) |
+
+Entry points:
+
+```bash
+sh bench/runner/run.sh continuous <lib> <dir> [model]
+sh bench/runner/run.sh fresh       <lib> <dir> [model]
+sh bench/runner/run.sh team        <lib> <dir> <pairs> [model]
+# Three models (planner / worker / reviewer), like commit0:
+sh bench/runner/run_team.sh <lib> <dir> <planner> <worker> <reviewer> <pairs>
+BENCH_LIBS=tinydb sh bench/runner/run_matrix.sh /tmp/matrix-three-way
+```
+
+| Env | Meaning |
+|---|---|
+| `BENCH_CLI` | wteam adapter name: `cursor` (default), `claude`, `codex`, `opencode`, `pi`, … |
+| `BENCH_MODEL` | Default model for all roles |
+| `BENCH_PLANNER_MODEL` / `BENCH_WORKER_MODEL` / `BENCH_REVIEWER_MODEL` | Team overrides |
+| `BENCH_REVIEW` | `autopass` (fake reviewer) or `on` / `real` (same CLI as workers) |
+| `BENCH_PAIRS` | Team pair count (default 4) |
+| `WTEAM_BENCH_ISOLATION` | Team isolation (runner default `worktree`; brownfield often `none`) |
+| `PLAN=<dir>` | Saved `spec.md` + tickets — continuous loads all in one prompt; fresh one session per ticket |
+| `CODEGRAPH`, `SHAPE=coupled`, `OVERLAP`, `RUN_TIMEOUT` | Same as commit0 wteam |
+
+Metrics land in `<dir>.logs/metrics.txt` (`bench_mode`, `bench_cli`, grade `RESULT`, tokens or `cost_usd`).
+Full detail: [`bench/runner/README.md`](https://github.com/bcmyguest/wteam/blob/main/bench/runner/README.md).
+
+[`bench/agent/`](https://github.com/bcmyguest/wteam/tree/main/bench/agent) and thin wrappers under
+[`bench/commit0/`](https://github.com/bcmyguest/wteam/tree/main/bench/commit0) and
+[`bench/brownfield/`](https://github.com/bcmyguest/wteam/tree/main/bench/brownfield) **delegate** to
+`bench/runner/` (`run_single.sh` → continuous, `run_wteam.sh` → team). Brownfield adds
+`sh bench/brownfield/run.sh <continuous|fresh|team> …` on the internal task.
+
+[`bench/BENCH_OPTIONS.md`](https://github.com/bcmyguest/wteam/blob/main/bench/BENCH_OPTIONS.md) notes
+which external suites are saturated vs still useful; [`bench/terminal-bench/`](https://github.com/bcmyguest/wteam/tree/main/bench/terminal-bench) targets Harbor Terminal-Bench 4.0.
+
 ## Architectural benefits (not scored by these suites)
 
 These are product properties the benchmarks do not price:

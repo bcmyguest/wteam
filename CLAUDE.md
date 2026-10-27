@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with
 code in this repository.
 
-wteam: Portable worker/reviewer teams for coding agents (Claude Code, Codex, opencode, Cursor).
+wteam: Portable worker/reviewer teams for coding agents (Claude Code, Codex, opencode, Pi, Cursor).
 
 ## Architecture
 

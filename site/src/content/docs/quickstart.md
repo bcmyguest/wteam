@@ -52,6 +52,24 @@ wteam graph --work    # work graph as Mermaid
 
 Every command accepts `--json` for machine-readable output.
 
+## Choose an agent CLI
+
+Override built-in roles with `.wteam/agents/<name>.toml` (`cli`, `model`, `profile`).
+Supported headless CLIs: **Claude Code**, **Codex**, **OpenCode**, **Pi** (experimental —
+use a sandbox; no profile enforcement), and **fake** (tests). **Cursor** is in progress.
+Example OpenCode worker:
+
+```toml
+name = "worker"
+cli = "opencode"
+model = "anthropic/claude-sonnet-4-20250514"
+profile = "edit"
+prompt = "worker"
+```
+
+Run `wteam permissions --profile edit --cli opencode` before your first run. See
+[Architecture](../architecture/#agent-adapters) and [Permissions](../permissions/).
+
 ## Move one ticket through review
 
 The orchestrator dispatches a ready ticket to a worker pair:

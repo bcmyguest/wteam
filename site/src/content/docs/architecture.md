@@ -16,7 +16,7 @@ The library lives in `src/lib.rs`. `src/main.rs` only parses arguments and print
 | `mailbox.rs` | Append-only mail format and parser |
 | `state.rs` | `state.json`; written only through `state::with_state` |
 | `paths.rs` | Every on-disk path under `.wteam/` |
-| `adapters/` | Per-CLI command builders (Claude Code, Codex, opencode, pi, fake) |
+| `adapters/` | Per-CLI command builders (Claude Code, Codex, opencode, pi, cursor, fake) |
 | `permissions/` | Profile translation per CLI |
 | `team/` | DOT team-graph parser |
 | `transport/` | How a delivered mail starts a turn; self-healing and retries in `resume.rs` |
@@ -52,6 +52,65 @@ sequenceDiagram
 
 On adapter failure (non-zero exit or unparsable output), the turn logs the error,
 mails the orchestrator and, if the agent holds a ticket, marks that ticket `Blocked`.
+
+## Agent adapters
+
+Each agent definition names a `cli`. The adapter builds one headless command per
+turn (`resume` transport), parses stdout, and stores `session_id`, `context_tokens`
+and assistant text in `state.json`. Turn output is also written to
+`.wteam/<slug>/logs/<agent>-<turn>.log` (stdout and stderr concatenated).
+
+| `cli` | Command (summary) | Session resume |
+|---|---|---|
+| `claude` | `claude -p … --output-format stream-json` | `--resume <id>` |
+| `codex` | `codex exec --json …` | `--resume <id>` |
+| `opencode` | `opencode run --format json …` | `-s <id>` |
+| `pi` | `pi --mode json …` | `--session <id>` |
+| `cursor` | Cursor `agent` (in progress) | per adapter |
+| `fake` | `sh $WTEAM_FAKE_DIR/<role>.sh` | `session:` line in stdout |
+
+Role prompts: Claude, Codex, Pi and Cursor append a system prompt on the first
+turn only; OpenCode prepends the role text to the user message on the first turn.
+Permissions come from the agent's profile (see [Permissions](../permissions/)).
+
+### OpenCode
+
+OpenCode emits JSONL on stdout (`opencode run --format json`). The adapter reads
+`sessionID`, accumulates `text` parts from the last assistant message, and takes
+context size from the last `step_finish` (`tokens.input + tokens.cache.read`).
+If the stream ends before final `text` events (known races in some environments),
+text is recovered from `part_delta` records (`partType: text`). An `error` event
+fails the turn. Non-JSON lines fail parsing. The `full` profile adds `--auto`; other
+profiles set `OPENCODE_PERMISSION` from translated rules.
+
+### Pi (experimental)
+
+Pi emits JSONL (`pi --mode json`): a session header, then `message_end` for each
+message. wteam keeps the last assistant `message_end` (text blocks and usage).
+`stopReason` `error` or `aborted` fails the turn. **Pi has no permission API:**
+every profile row is ✘ except `full` (documented as unrestricted). Run Pi inside
+an OS or container sandbox. Treat Pi support as best-effort.
+
+### Local CLI shims
+
+When `$WTEAM_ROOT/bin/<program>` exists (for example a test wrapper), the turn
+runner executes that file instead of searching `PATH`. This does not change
+production behavior unless you add a shim under the repo root.
+
+### Maintaining adapter fixtures
+
+Golden JSONL lives under `tests/fixtures/adapters/`. Refresh OpenCode (and
+optionally Pi) from a live CLI:
+
+```bash
+tests/smoke/capture-adapter-fixtures.sh
+# Pi (experimental, needs credentials):
+WTEAM_PI_SMOKE=1 tests/smoke/capture-adapter-fixtures.sh
+```
+
+Set `WTEAM_OPENCODE_SMOKE_MODEL` for OpenCode (default
+`github-copilot/gemini-3.8-flash`). Integration tests replay fixtures via
+`$WTEAM_ROOT/bin` wrappers (`tests/adapters_cli_loop.rs`).
 
 ## Ticket lifecycle
 

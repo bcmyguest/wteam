@@ -30,7 +30,8 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `report` | Print the stop report |
 | `role <name>` | Print a resolved role prompt (project, config dir, then built-in) |
 | `graph` | Team or work graph as Mermaid (`--work`, `--team <name>`) |
-| `permissions` | Profile translation matrix (`--profile`, `--cli`) |
+| `permissions` | Profile translation matrix (`--profile`, `--cli`; default CLIs omit `pi`, use `--cli pi`) |
+| `phase` | Goldfish phases (`plan-review`, `validate`, …) with fresh-context agents |
 | `config promote\|list\|show` | Saved teams under `~/.config/wteam`. In progress. |
 | `setup` | Detect herdr and pick a transport. In progress. |
 
@@ -73,12 +74,17 @@ Optional. Resolved from `.wteam/agents/<name>.toml`, then
 ```toml
 name = "worker"
 cli = "claude"       # claude | codex | opencode | pi | fake (cursor: in progress; pi: experimental — sandbox only)
-model = "sonnet"
+model = "sonnet"     # opencode: provider/model; pi: --model pattern
 prompt = "worker"
 profile = "edit"
 context_window = 200000  # optional; caps the orchestrator handoff at 0.75 of it
-extra_args = []      # passed through to the CLI
+extra_args = []      # passed through to the CLI after adapter flags
 ```
+
+OpenCode models use `provider/model` (`-m`). Pi uses `pi --mode json` with
+`--append-system-prompt` on the first turn and `--session` on resume. See
+[Architecture](../architecture/#agent-adapters) for JSONL parsing and the smoke
+script `tests/smoke/capture-adapter-fixtures.sh`.
 
 ## Profile TOML
 
@@ -107,5 +113,5 @@ A cycle or an unknown parent is an error that names the chain.
 
 `spec.md`, `tickets/NN-name.md`, `state.json`, `mail/<agent>.md`,
 `reviews/NN.md`, `queue.md`, `handoffs/`, `logs/<agent>-<turn>.log`,
-`backup/` and `worktrees/pair<N>/`. The full layout is in the repository's
-`architecture.md`.
+`backup/` and `worktrees/pair<N>/`. Module map and adapter detail:
+[Architecture](../architecture/).
