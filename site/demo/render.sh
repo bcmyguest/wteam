@@ -16,7 +16,9 @@ if command -v asciinema >/dev/null && command -v agg >/dev/null && command -v tm
   cast="$SITE/demo/.cache/demo.cast"
   mkdir -p "$(dirname "$cast")"
   asciinema rec -y --cols 120 --rows 36 -c "sh demo/play.sh" -t "wteam demo" --overwrite "$cast"
-  agg --font-size 14 "$cast" public/demo.gif
+  trimmed="$SITE/demo/.cache/demo.trimmed.cast"
+  sh "$SITE/demo/trim-cast.sh" "$cast" "$trimmed" >/dev/null
+  agg --font-size 14 --last-frame-duration 1 "$trimmed" public/demo.gif
   exit 0
 fi
 
