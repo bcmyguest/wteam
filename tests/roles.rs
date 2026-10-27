@@ -73,10 +73,12 @@ fn worker_names_its_commands() {
         "worker",
         &[
             "wteam inbox",
+            "wteam send",
             "wteam submit",
             "--summary-file",
             "wteam block",
             "--reason-file",
+            "Team",
         ],
     );
 }
@@ -97,6 +99,8 @@ fn reviewer_submits_verdict_via_file() {
         "reviewer",
         &[
             "wteam verdict",
+            "wteam send",
+            "Team",
             "--file scratch/verdict-",
             "scratch/verdict-",
         ],

@@ -488,10 +488,11 @@ pub fn one_turn_def(
         t
     };
     let role_prompt = if first {
-        Some(agents::role_prompt(
-            def.prompt.as_deref().unwrap_or(def_name),
-            &search,
-        )?)
+        let base = agents::role_prompt(def.prompt.as_deref().unwrap_or(def_name), &search)?;
+        Some(format!(
+            "{base}\n\n{}",
+            crate::team::roster_section(&ctx.team, agent)
+        ))
     } else {
         None
     };

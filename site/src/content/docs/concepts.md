@@ -78,6 +78,11 @@ a blank line and exactly `length` bytes of body. Parsers read by length, so a
 body can hold a diff or a whole ticket. `wteam inbox` shows unread messages
 and `--all` shows the whole mailbox.
 
+On the **first turn** of a session, the role prompt includes a **Team** section:
+every instance id (`worker.2`, `reviewer.2`, `orchestrator.1`, …) and your pair
+index when you are a worker or reviewer. Reach anyone with
+`wteam send <instance> "…"` (ticket flow still uses `submit` / `verdict` / dispatch).
+
 ## Handoff
 
 When the orchestrator's context passes `min(handoff_tokens, 0.75 × context_window)`,

@@ -322,6 +322,45 @@ pub fn instance_id(role: &str, index: u32) -> String {
     format!("{role}.{index}")
 }
 
+/// Who is on this run and how to reach them. Appended to the role prompt on the first turn.
+pub fn roster_section(team: &Team, agent: &str) -> String {
+    let (self_role, index) = parse_instance(agent);
+    let mut out = format!(
+        "## Team\n\nYou are `{agent}`. Mail any teammate with `wteam send <instance> \"…\"`; they read it with `wteam inbox`.\n\nInstances this run:\n"
+    );
+    for (name, role) in &team.roles {
+        let NodeKind::Agent { count, .. } = &role.kind else {
+            continue;
+        };
+        for i in 1..=*count {
+            let id = instance_id(name, i);
+            let mark = if id == agent { " (you)" } else { "" };
+            out.push_str(&format!("- `{id}`{mark}\n"));
+        }
+    }
+    match self_role.as_str() {
+        "worker" if team.count("reviewer") >= index => {
+            out.push_str(&format!(
+                "\nYour reviewer pair: `{}`. Ticket mail uses `submit` / `verdict`; use `wteam send` when you need to coordinate outside that.\n",
+                instance_id("reviewer", index)
+            ));
+        }
+        "reviewer" if team.count("worker") >= index => {
+            out.push_str(&format!(
+                "\nYour worker pair: `{}`.\n",
+                instance_id("worker", index)
+            ));
+        }
+        "orchestrator" => {
+            out.push_str(
+                "\nYou dispatch workers and may `wteam send` any instance when the graph does not already route mail.\n",
+            );
+        }
+        _ => {}
+    }
+    out
+}
+
 /// Split `worker.2` into (`worker`, 2). A bare role means index 1.
 pub fn parse_instance(id: &str) -> (String, u32) {
     match id.rsplit_once('.') {
@@ -339,6 +378,17 @@ mod tests {
 
     fn team(src: &str, pairs: u32) -> Result<Team> {
         Team::from_graph(&dot::parse(src).unwrap(), pairs)
+    }
+
+    #[test]
+    fn roster_lists_instances_and_pair() {
+        let t = Team::default_topology(2);
+        let r = roster_section(&t, "worker.2");
+        assert!(r.contains("You are `worker.2`"));
+        assert!(r.contains("`worker.1`"));
+        assert!(r.contains("`reviewer.2`"));
+        assert!(r.contains("Your reviewer pair: `reviewer.2`"));
+        assert!(r.contains("wteam send"));
     }
 
     #[test]

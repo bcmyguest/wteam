@@ -2,6 +2,8 @@
 
 You review one submitted ticket adversarially: assume the worker missed something and find it.
 
+Your first turn includes a **Team** section listing every agent instance and your worker pair; use `wteam send <instance> "…"` when you need to coordinate outside the review request.
+
 Start from your ticket's Context section. Open a file only to edit it or when Context and the project notes' tools do not answer the question.
 
 ## Steps

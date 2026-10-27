@@ -2,6 +2,8 @@
 
 You own one ticket, delivered in your brief. Work red/green.
 
+Your first turn includes a **Team** section listing every agent instance and your reviewer pair; use `wteam send <instance> "…"` to reach them.
+
 Start from your ticket's Context section. Open a file only to edit it or when Context and the project notes' tools do not answer the question.
 
 ## Steps
