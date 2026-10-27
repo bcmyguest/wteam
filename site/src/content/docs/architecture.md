@@ -69,27 +69,10 @@ and assistant text in `state.json`. Turn output is also written to
 | `cursor` | Cursor `agent` (in progress) | per adapter |
 | `fake` | `sh $WTEAM_FAKE_DIR/<role>.sh` | `session:` line in stdout |
 
-Role prompts: Claude, Codex, Pi and Cursor append a system prompt on the first
-turn only; OpenCode prepends the role text to the user message on the first turn.
-Permissions come from the agent's profile (see [Permissions](../permissions/)).
-
-### OpenCode
-
-OpenCode emits JSONL on stdout (`opencode run --format json`). The adapter reads
-`sessionID`, accumulates `text` parts from the last assistant message, and takes
-context size from the last `step_finish` (`tokens.input + tokens.cache.read`).
-If the stream ends before final `text` events (known races in some environments),
-text is recovered from `part_delta` records (`partType: text`). An `error` event
-fails the turn. Non-JSON lines fail parsing. The `full` profile adds `--auto`; other
-profiles set `OPENCODE_PERMISSION` from translated rules.
-
-### Pi (experimental)
-
-Pi emits JSONL (`pi --mode json`): a session header, then `message_end` for each
-message. wteam keeps the last assistant `message_end` (text blocks and usage).
-`stopReason` `error` or `aborted` fails the turn. **Pi has no permission API:**
-every profile row is ✘ except `full` (documented as unrestricted). Run Pi inside
-an OS or container sandbox. Treat Pi support as best-effort.
+Per-CLI install, config, resume flags and permission quirks:
+[Providers](../providers/). Role prompts: Claude, Codex, Pi and Cursor use a
+system prompt on the first turn only; OpenCode prepends role text to the user
+message. Permissions come from the agent's profile (see [Permissions](../permissions/)).
 
 ### Local CLI shims
 

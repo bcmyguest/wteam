@@ -73,7 +73,7 @@ Optional. Resolved from `.wteam/agents/<name>.toml`, then
 
 ```toml
 name = "worker"
-cli = "claude"       # claude | codex | opencode | pi | fake (cursor: in progress; pi: experimental — sandbox only)
+cli = "claude"       # see Providers for each cli
 model = "sonnet"     # opencode: provider/model; pi: --model pattern
 prompt = "worker"
 profile = "edit"
@@ -83,8 +83,8 @@ extra_args = []      # passed through to the CLI after adapter flags
 
 OpenCode models use `provider/model` (`-m`). Pi uses `pi --mode json` with
 `--append-system-prompt` on the first turn and `--session` on resume. See
-[Architecture](../architecture/#agent-adapters) for JSONL parsing and the smoke
-script `tests/smoke/capture-adapter-fixtures.sh`.
+[Providers](../providers/) for install, resume flags and JSONL detail;
+[Architecture](../architecture/#agent-adapters) for shims and fixtures.
 
 ## Profile TOML
 

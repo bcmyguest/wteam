@@ -168,6 +168,53 @@ chats.
 EOF
 }
 
+brownfield_goal() {
+  BENCH=$1
+  cat "$BENCH/task.md"
+}
+
+brownfield_plan_prompt() {
+  wteam=$1
+  root=$2
+  goal=$3
+  pairs=$4
+  printf '%s\n' "$("$wteam" --root "$root" --slug bench role planner)
+
+Goal:
+$goal
+
+Slug: bench
+Write the spec and 2-6 implementation tickets under .wteam/bench/. Use the existing code and tests for Context and Verify. Finish only after wteam --slug bench pickup reports no problems."
+}
+
+brownfield_finish_run() {
+  LOGS=$1
+  OUT=$2
+  BENCH=$3
+  WTEAM=$(wteam_bin)
+  python3 "$BENCH/token_usage.py" "$LOGS" "$OUT/.wteam/bench/logs" >>"$LOGS/metrics.txt" 2>/dev/null || \
+    python3 "$BENCH/token_usage.py" "$LOGS" >>"$LOGS/metrics.txt" 2>/dev/null || true
+  finish_metrics "$LOGS" "$OUT" "$BENCH"
+  if sh "$BENCH/grade.sh" "$OUT" >"$LOGS/grade.txt" 2>&1; then
+    echo "grade_pass 1" >>"$LOGS/metrics.txt"
+    tail -n 5 "$LOGS/grade.txt"
+  else
+    echo "grade_pass 0" >>"$LOGS/metrics.txt"
+    "$WTEAM" --root "$OUT" --slug bench refine --logs "$LOGS" --grade "$LOGS/grade.txt" --run-log "$LOGS/run.txt" \
+      >"$LOGS/refine.txt" 2>&1 || true
+    tail -n 12 "$LOGS/grade.txt"
+    return 1
+  fi
+}
+
+bench_export_models() {
+  export BENCH_CLI=${BENCH_CLI:-cursor}
+  export BENCH_MODEL=${BENCH_MODEL:-${WTEAM_BENCH_MODEL:-composer-2.5}}
+  export BENCH_WORKER_MODEL=${BENCH_WORKER_MODEL:-${WTEAM_BENCH_WORKER_MODEL:-$BENCH_MODEL}}
+  export BENCH_REVIEWER_MODEL=${BENCH_REVIEWER_MODEL:-${WTEAM_BENCH_REVIEWER_MODEL:-$BENCH_MODEL}}
+  export BENCH_REVIEW=${BENCH_REVIEW:-${WTEAM_BENCH_REVIEW:-autopass}}
+}
+
 finish_metrics() {
   LOGS=$1
   OUT=$2

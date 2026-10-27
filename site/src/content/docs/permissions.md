@@ -3,7 +3,8 @@ title: Permissions
 description: Profile rules and how each CLI translates them.
 ---
 
-Profiles are Claude permission rules. Each agent names one profile. wteam
+Profiles are Claude permission rules. Each agent names one profile and a `cli`;
+see [Providers](./providers/) for install and per-CLI behaviour. wteam
 translates it for each CLI. The translation is not always exact, so each cell
 is marked:
 

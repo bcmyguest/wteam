@@ -16,10 +16,9 @@ Instances are numbered: `worker.2` is the second worker. `orchestrator` and
 `planner` are always `.1`. A pair is one worker and one reviewer with the same index.
 
 Each role resolves to an **agent definition** (TOML): `cli`, optional `model`,
-`profile`, and `prompt`. Built-in CLIs are Claude Code, Codex, OpenCode, Pi
-(experimental — sandbox only), and `fake` for tests; Cursor is in progress.
-wteam runs one headless adapter invocation per turn, resumes the stored session id
-when the CLI supports it, and parses assistant text plus token usage from stdout.
+`profile`, and `prompt`. Built-in CLIs are listed on [Providers](../providers/).
+wteam runs one headless adapter invocation per turn, resumes the stored session
+id when the CLI supports it, and parses assistant text plus token usage from stdout.
 See [Architecture](../architecture/#agent-adapters).
 
 ## Team graph

@@ -19,10 +19,9 @@ worker implements one ticket. A reviewer checks the result against the ticket
 and either passes it or sends it back. The orchestrator dispatches tickets and
 the reviewer's verdicts decide what commits.
 
-Agents talk through append-only mailboxes in `.wteam/`. The CLI works the same
-for Claude Code, Codex, OpenCode, Pi (experimental — sandbox only) and Cursor.
-Each CLI maps permission profiles differently; see [Permissions](./permissions/)
-and [Architecture](./architecture/#agent-adapters).
+Agents talk through append-only mailboxes in `.wteam/`. The CLI works the same for Claude Code, Codex, OpenCode, Pi and Cursor; see
+[Providers](./providers/) for per-CLI setup. Permission profiles map differently
+per CLI — [Permissions](./permissions/) and [Architecture](./architecture/#agent-adapters).
 
 ![wteam demo: `wteam tickets add`, live agent dashboard, `wteam run --pairs 2`, then commits](/wteam/demo.gif)
 

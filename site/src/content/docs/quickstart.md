@@ -55,9 +55,7 @@ Every command accepts `--json` for machine-readable output.
 ## Choose an agent CLI
 
 Override built-in roles with `.wteam/agents/<name>.toml` (`cli`, `model`, `profile`).
-Supported headless CLIs: **Claude Code**, **Codex**, **OpenCode**, **Pi** (experimental —
-use a sandbox; no profile enforcement), and **fake** (tests). **Cursor** is in progress.
-Example OpenCode worker:
+Supported headless CLIs are listed on [Providers](../providers/). Example OpenCode worker:
 
 ```toml
 name = "worker"
@@ -68,7 +66,7 @@ prompt = "worker"
 ```
 
 Run `wteam permissions --profile edit --cli opencode` before your first run. See
-[Architecture](../architecture/#agent-adapters) and [Permissions](../permissions/).
+[OpenCode](../providers/opencode/) and [Permissions](../permissions/).
 
 ## Move one ticket through review
 
