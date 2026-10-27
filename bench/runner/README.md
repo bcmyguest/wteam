@@ -11,6 +11,15 @@ Commit0-style tasks (hidden pytest grade) with **any wteam CLI** and three **con
 [`bench/commit0/`](../commit0/) remains the published Claude Code harness; this tree is CLI-agnostic.
 Default CLI today is **cursor** (`agent`); set `BENCH_CLI=claude` for Haiku/Sonnet parity.
 
+**Polyglot** (Aider 34-exercise suite): [`bench/polyglot/`](../polyglot/) — same three context modes:
+
+```bash
+export BENCH_CLI=cursor BENCH_MODEL=composer-2.5
+HIDDEN=1 sh bench/runner/run_polyglot_continuous.sh "$POLYGLOT" /tmp/pg
+HIDDEN=1 sh bench/runner/run_polyglot_team.sh "$POLYGLOT" /tmp/pg-team 4
+sh bench/polyglot/run_matrix.sh "$POLYGLOT" /tmp/pg-matrix 4
+```
+
 ## Configuration
 
 | Env | Meaning |

@@ -2,6 +2,8 @@
 
 Primary external bench: **[Terminal-Bench 4.0](terminal-bench/)** via Harbor (`terminal-bench/terminal-bench`, 66 tasks).
 
+**Polyglot (in-repo):** [`polyglot/`](polyglot/) — Aider Python 34-pack; `BENCH_CLI` + `run_single.sh` / `run_wteam.sh` / `run_matrix.sh`.
+
 ## Saturated or weak for pass-rate / team vs single
 
 - Commit0 / incidentkit / incidentkit-debug (hidden pytest near ceiling)

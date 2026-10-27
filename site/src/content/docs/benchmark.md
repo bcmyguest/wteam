@@ -4,7 +4,7 @@ description: wteam against single-agent baselines on Aider's polyglot benchmark 
 ---
 
 One run per configuration on 2026-10-22, so treat differences of one or two exercises as noise.
-The harness is in [`bench/polyglot/`](https://github.com/bcmyguest/wteam/tree/main/bench/polyglot); rerun it with your own models.
+The harness is in [`bench/polyglot/`](https://github.com/bcmyguest/wteam/tree/main/bench/polyglot); it uses the shared [`bench/runner/`](https://github.com/bcmyguest/wteam/tree/main/bench/runner) so you can set **`BENCH_CLI`** (`cursor`, `claude`, `codex`, …) and rerun with your models.
 
 wteam optimizes **controlled parallel delivery and reviewable ownership**, not minimum token cost.
 These suites mostly measure the latter, so a single coherent session often wins on pass rate and dollars.
@@ -21,9 +21,10 @@ Fresh-context Goldfish phases (`wteam phase plan-review` / `wteam phase validate
 - **Two modes:**
   - **visible**: the unit tests sit next to the stub, and wteam tickets carry them as `Verify:`.
   - **hidden**: the tests are removed before the agents start (Aider's protocol), so agents work from `INSTRUCTIONS.md` alone and must write their own checks.
-- **Baselines:** one headless `claude -p` session solves all 34, with the same isolation and permission shape as wteam workers.
-- **wteam:** one ticket per exercise, 4 worker/reviewer pairs, worktree isolation, built-in profiles.
-- **Cost:** the `total_cost_usd` Claude Code reports (API-equivalent). Subscription users pay differently, but the ratios hold.
+- **Baselines:** one headless session solves all 34 (`run_single.sh` / `run_polyglot_continuous.sh`). Default **`BENCH_CLI=cursor`** today; published tables used Claude Haiku/Sonnet.
+- **wteam:** one ticket per exercise, 4 worker/reviewer pairs (`run_wteam.sh`). Set `BENCH_REVIEW=on` for a real reviewer on the same CLI.
+- **Matrix:** `sh bench/polyglot/run_matrix.sh <checkout> <dir> 4` runs continuous, fresh-per-ticket, and team with the same CLI config.
+- **Cost:** Claude runs report `total_cost_usd`; Cursor stream-json logs feed `metrics.py` (`total_tokens`). Subscription pricing differs; ratios still compare arms fairly.
 
 ## Results
 

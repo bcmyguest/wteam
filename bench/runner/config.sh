@@ -2,6 +2,7 @@
 # shellcheck shell=sh
 RUNNER=$(cd "$(dirname "$0")" && pwd)
 COMMIT0=$(cd "$RUNNER/../commit0" && pwd)
+POLYGLOT=$(cd "$RUNNER/../polyglot" && pwd)
 BF=$(cd "$RUNNER/../brownfield" && pwd)
 . "$BF/common.sh"
 

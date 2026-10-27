@@ -73,6 +73,35 @@ bench_codegraph_setup() {
   grep -qF '.codegraph/' "$out/.git/info/exclude" 2>/dev/null || printf '.codegraph/\n' >>"$out/.git/info/exclude"
 }
 
+# Polyglot: tickets come from prepare.sh; orchestrator + worker + reviewer only.
+bench_setup_polyglot_agents() {
+  out=$1
+  worker=$(bench_worker_model)
+  reviewer=$(bench_reviewer_model)
+  cli=$(bench_cli)
+  bench_write_agent "$out" orchestrator control "$worker" "$cli"
+  bench_write_agent "$out" worker edit "$worker" "$cli"
+  review_mode=${BENCH_REVIEW:-autopass}
+  case $review_mode in
+    autopass|off)
+      install_autopass_reviewer "$out"
+      printf 'name = "reviewer"\ncli = "fake"\nmodel = "fake"\nprompt = "autopass"\nprofile = "review"\n' \
+        >"$out/.wteam/agents/reviewer.toml"
+      ;;
+    on|real|cursor)
+      if [ "$review_mode" = cursor ] || [ "$cli" = cursor ]; then
+        write_reviewer_agent "$out" "$reviewer"
+      else
+        bench_write_agent "$out" reviewer review "$reviewer" "$cli"
+      fi
+      ;;
+    *)
+      echo "unknown BENCH_REVIEW=$review_mode (autopass|on|real|cursor)" >&2
+      exit 2
+      ;;
+  esac
+}
+
 bench_plan_prompt() {
   goal=$1
   pairs=$2
