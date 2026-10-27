@@ -340,3 +340,25 @@ fn opencode_malformed_names_cli_and_line() {
         "{e}"
     );
 }
+
+#[test]
+fn opencode_truncated_stream_uses_part_delta_text() {
+    let o = Opencode
+        .parse_output(&fixture("opencode/truncated-delta.jsonl"))
+        .unwrap();
+    assert_eq!(o.session_id.as_deref(), Some("ses_trunc"));
+    assert_eq!(o.context_tokens, Some(150));
+    assert_eq!(o.text, "hello");
+}
+
+#[test]
+fn opencode_error_event_fails_the_turn() {
+    let e = Opencode
+        .parse_output(&fixture("opencode/error-event.jsonl"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("opencode") && e.contains("Rate limit exceeded"),
+        "{e}"
+    );
+}

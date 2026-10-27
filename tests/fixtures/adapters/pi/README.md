@@ -7,7 +7,9 @@ Source: `github.com/badlogic/pi-mono`, commit `58c0b02ce552adab76014e7ed712ab798
 - `packages/coding-agent/docs/message-types.md`: `AssistantMessage` (`stopReason`, `errorMessage`, `usage`), `ToolCall`, `TextContent`.
 - `packages/coding-agent/docs/session-format.md`: `SessionHeader` (`id` is the session id).
 
-`pi` is not installed here, so no live run was made. All fixtures are CONSTRUCTED from the documented shapes:
+**Experimental:** wteam’s Pi adapter is best-effort; run Pi in a sandbox (no permission mapping). Refresh `first-turn.jsonl` with `WTEAM_PI_SMOKE=1 tests/smoke/capture-adapter-fixtures.sh` when credentials are available.
+
+Unless captured live, fixtures are CONSTRUCTED from the documented shapes:
 
 - `first-turn.jsonl`: CONSTRUCTED. One tool call, then a final text message. Usage numbers are invented.
 - `error.jsonl`: CONSTRUCTED. Assistant message with `stopReason: "error"`.

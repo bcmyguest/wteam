@@ -610,11 +610,23 @@ fn tail(text: &str) -> String {
 
 /// Run `spec` to completion: (stdout, stderr, exit success). With `track`, the child gets its
 /// own process group and its pid becomes that agent's `turn_pid` while it runs.
+/// When `$WTEAM_ROOT/bin/<program>` exists, run that instead (tests and local CLI shims).
+fn resolve_program(program: &str, env: &[(String, String)]) -> std::path::PathBuf {
+    if let Some((_, root)) = env.iter().find(|(k, _)| k == "WTEAM_ROOT") {
+        let shim = std::path::PathBuf::from(root).join("bin").join(program);
+        if shim.is_file() {
+            return shim;
+        }
+    }
+    std::path::PathBuf::from(program)
+}
+
 fn run_spec(
     spec: &CommandSpec,
     track: Option<(&crate::paths::Paths, &str)>,
 ) -> Result<(String, String, bool)> {
-    let mut cmd = Command::new(&spec.program);
+    let program = resolve_program(&spec.program, &spec.env);
+    let mut cmd = Command::new(&program);
     cmd.args(&spec.args)
         .envs(spec.env.iter().cloned())
         .current_dir(&spec.cwd)
@@ -806,6 +818,21 @@ mod tests {
         assert_eq!(utc_iso(0), "1970-01-01T00:00:00Z");
         assert_eq!(utc_iso(1_700_000_000), "2023-11-14T22:13:20Z");
         assert_eq!(utc_iso(951_782_400), "2000-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn resolve_program_prefers_wteam_root_bin_shim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let shim = bin.join("opencode");
+        std::fs::write(&shim, "#!/bin/sh\n").unwrap();
+        let env = vec![("WTEAM_ROOT".into(), tmp.path().display().to_string())];
+        assert_eq!(resolve_program("opencode", &env), shim);
+        assert_eq!(
+            resolve_program("missing", &env),
+            std::path::PathBuf::from("missing")
+        );
     }
 
     #[test]

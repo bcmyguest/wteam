@@ -1,0 +1,4 @@
+{"type":"step_start","timestamp":1792650000000,"sessionID":"ses_trunc","part":{"id":"prt_0","sessionID":"ses_trunc","messageID":"msg_final","type":"step-start"}}
+{"type":"part_delta","partID":"prt_text","field":"text","delta":"hel","partType":"text"}
+{"type":"part_delta","partID":"prt_text","field":"text","delta":"lo","partType":"text"}
+{"type":"step_finish","timestamp":1792650002000,"sessionID":"ses_trunc","part":{"id":"prt_1","sessionID":"ses_trunc","messageID":"msg_final","type":"step-finish","reason":"stop","tokens":{"input":100,"output":5,"reasoning":0,"cache":{"read":50,"write":0}}}}

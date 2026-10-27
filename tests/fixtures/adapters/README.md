@@ -4,5 +4,6 @@ Adapter fixtures.
 - `codex/usage-limit.jsonl`: recorded from `codex exec --json --skip-git-repo-check "say ok"` (0.156.1); the account had hit its usage limit, so it is the real failure shape.
 - `codex/first-turn.jsonl`: CONSTRUCTED from the documented event formats (no successful live run was possible).
 - `codex/home/`: constructed `$CODEX_HOME` with rollout files (`token_count` events as seen in real rollouts); the `10/20` file is older and must lose.
-- `opencode/first-turn.jsonl`: CONSTRUCTED from the export format. Live `opencode run --format json` produced no output here and was not verified.
+- `opencode/first-turn.jsonl`: CONSTRUCTED from the export format unless refreshed by `tests/smoke/capture-adapter-fixtures.sh` (OpenCode live smoke).
+- `opencode/truncated-delta.jsonl`, `opencode/error-event.jsonl`: hand-written parser edge cases.
 - `*/malformed.jsonl`, `claude/error.jsonl`: hand-written error cases.

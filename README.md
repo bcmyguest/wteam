@@ -164,7 +164,7 @@ Each role is an agent definition, a TOML file with `name`, `cli`, and optional
 `model`, `prompt`, `profile`, `context_window` and `extra_args`. Built-ins cover
 `planner`, `orchestrator`, `worker` and `reviewer`. Override one with
 `.wteam/agents/<name>.toml` or `$WTEAM_CONFIG_DIR/agents/<name>.toml`.
-`cli` is `claude`, `codex`, `opencode`, `pi` or `fake` (used by tests); `cursor` is in progress.
+`cli` is `claude`, `codex`, `opencode`, `pi` or `fake` (used by tests); `cursor` is in progress. **Pi is experimental** — use a sandbox; wteam cannot enforce profile rules on Pi. Refresh adapter fixtures with `tests/smoke/capture-adapter-fixtures.sh` (OpenCode uses `WTEAM_OPENCODE_SMOKE_MODEL`, default `github-copilot/gemini-3.8-flash`; Pi capture needs `WTEAM_PI_SMOKE=1`).
 
 Claude agents run with project and local settings only, so user hooks and rules
 do not reach them. Set

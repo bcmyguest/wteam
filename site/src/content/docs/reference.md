@@ -72,7 +72,7 @@ Optional. Resolved from `.wteam/agents/<name>.toml`, then
 
 ```toml
 name = "worker"
-cli = "claude"       # claude | codex | opencode | pi | fake (cursor: in progress)
+cli = "claude"       # claude | codex | opencode | pi | fake (cursor: in progress; pi: experimental — sandbox only)
 model = "sonnet"
 prompt = "worker"
 profile = "edit"

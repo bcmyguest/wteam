@@ -40,11 +40,16 @@ impl Adapter for Opencode {
 
     /// Session from `sessionID`, context from the last `step_finish`
     /// (`tokens.input + tokens.cache.read`), text from the `text` parts of the
-    /// last message that has any.
+    /// last message that has any. When the stream ends early (no final `text`
+    /// event), text is recovered from `part_delta` records.
     fn parse_output(&self, stdout: &str) -> Result<TurnOutput> {
         let mut out = TurnOutput::default();
         // (message id, text) per text part, in arrival order.
         let mut texts: Vec<(String, String)> = Vec::new();
+        let mut delta_by_part: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut delta_order: Vec<String> = Vec::new();
+        let mut session_error: Option<String> = None;
         for (i, line) in stdout.lines().enumerate() {
             if line.trim().is_empty() {
                 continue;
@@ -65,13 +70,40 @@ impl Adapter for Opencode {
                         texts.push((msg.to_string(), t.to_string()));
                     }
                 }
+                Some("part_delta") if ev["field"].as_str() == Some("text") => {
+                    let part_type = ev["partType"].as_str().unwrap_or("text");
+                    if part_type != "text" {
+                        continue;
+                    }
+                    let Some(id) = ev["partID"].as_str() else {
+                        continue;
+                    };
+                    if !delta_by_part.contains_key(id) {
+                        delta_order.push(id.to_string());
+                    }
+                    let slot = delta_by_part.entry(id.to_string()).or_default();
+                    if let Some(d) = ev["delta"].as_str() {
+                        slot.push_str(d);
+                    }
+                }
                 Some("step_finish") => {
                     let t = &part["tokens"];
                     let n = |v: &Value| v.as_u64().unwrap_or(0);
                     out.context_tokens = Some(n(&t["input"]) + n(&t["cache"]["read"]));
                 }
+                Some("error") => {
+                    let msg = ev["error"]["data"]["message"]
+                        .as_str()
+                        .or_else(|| ev["error"]["message"].as_str())
+                        .or_else(|| ev["error"]["name"].as_str())
+                        .unwrap_or("unknown error");
+                    session_error = Some(msg.to_string());
+                }
                 _ => {}
             }
+        }
+        if let Some(err) = session_error {
+            bail!("opencode: turn failed: {err}");
         }
         if let Some((last, _)) = texts.last() {
             let last = last.clone();
@@ -82,6 +114,11 @@ impl Adapter for Opencode {
                 .collect::<String>()
                 .trim()
                 .to_string();
+        } else if let Some(id) = delta_order.last() {
+            out.text = delta_by_part
+                .get(id)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
         }
         Ok(out)
     }

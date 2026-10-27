@@ -97,6 +97,33 @@ impl Repo {
         }
     }
 
+    /// Install `$WTEAM_ROOT/bin/<cli>`; the turn runner prefers that over PATH (adapter integration tests).
+    pub fn wrap_cli(&self, cli: &str, script: &str) {
+        let bin = self.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let path = bin.join(cli);
+        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    fn path_for_wteam(&self) -> String {
+        let bin = self.path().join("bin");
+        let base = path_with_wteam();
+        if bin.is_dir()
+            && std::fs::read_dir(&bin)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false)
+        {
+            format!("{}:{base}", bin.display())
+        } else {
+            base
+        }
+    }
+
     /// `wteam` with root, slug, fake dir and PATH (so scripts can call `wteam`).
     pub fn wteam(&self) -> assert_cmd::Command {
         let mut c = assert_cmd::Command::new(cargo_bin("wteam"));
@@ -106,7 +133,7 @@ impl Repo {
             .env("WTEAM_SLUG", &self.slug)
             .env("WTEAM_FAKE_DIR", self.fake_dir())
             .env("WTEAM_CONFIG_DIR", self.path().join(".wteam-config"))
-            .env("PATH", path_with_wteam());
+            .env("PATH", self.path_for_wteam());
         c
     }
 
