@@ -4,9 +4,9 @@ Dataset: terminal-bench/terminal-bench (66 tasks)
 
 2026-10-26
   oracle smoke (1 task): PASS reward 1.0, ~51s — /tmp/wteam-tb4-smoke
-  cursor-cli continuous (5 tasks): BLOCKED — Harbor agent in Docker requires
-    CURSOR_API_KEY on the host (OAuth login used by local `agent` is not enough).
-    Fix: copy env.example → .env.local with your Cursor API key, then re-run.
+  cursor-cli continuous (5 tasks): not finished — Harbor runs agent in Docker;
+    host `agent login` is enough for other bench arms. If Harbor trials error on
+    missing CURSOR_API_KEY, optional fallback: env.example → .env.local.
 
 Commands:
   sh bench/terminal-bench/run_smoke.sh 1

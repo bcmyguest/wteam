@@ -18,7 +18,11 @@ docker info   # local runs
 command -v agent   # for cursor-cli agent
 ```
 
-Cursor auth must work for `agent` / Harbor’s `cursor-cli` agent (same as other bench arms).
+Host benches ([`bench/runner/`](../runner/), brownfield) use **`agent` on the host** — normal **`agent login`** is enough.
+
+Harbor’s **`cursor-cli`** runs **inside Docker**. By default we **bind-mount** `~/.config/cursor/auth.json` (`TB_MOUNT_CURSOR_AUTH=auto`, override with `TB_CURSOR_AUTH_FILE`). That matches how you’re already logged in and avoids putting OAuth in env vars.
+
+**Caveat (upstream Harbor):** the stock **`cursor-cli`** agent still expects **`CURSOR_API_KEY`** inside the trial even with the mount. Until Harbor or a custom wteam agent reads the mounted file, set an API key in `.env.local` only as a fallback. Longer term: custom Harbor agent (auth mount only) or `acp:cursor` with `authenticate_method_id=cursor_login`.
 
 ## Quick start
 
@@ -50,6 +54,8 @@ Results land under `bench/terminal-bench/jobs/` (or `TB_JOBS_DIR`). Inspect with
 | `TB_ENV` | unset (local Docker); set `modal` / `daytona` + API keys for cloud |
 | `TB_N_CONCURRENT` | `1` |
 | `TB_INCLUDE_TASK` | `-i` filter for one task name |
+| `TB_MOUNT_CURSOR_AUTH` | `auto` (default): bind-mount OAuth `auth.json` when present |
+| `TB_CURSOR_AUTH_FILE` | Host path to mount (default `~/.config/cursor/auth.json`) |
 | `TB_SKIP_CREDENTIAL_CHECKS` | `auto` (default): `--skip-credential-checks` when `cursor-cli` and no `CURSOR_API_KEY` |
 
 Direct Harbor equivalent:

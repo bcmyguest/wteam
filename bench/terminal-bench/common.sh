@@ -23,17 +23,24 @@ load_tb_env() {
   return 1
 }
 
-require_cursor_api_key() {
+cursor_auth_file() {
+  printf '%s\n' "${TB_CURSOR_AUTH_FILE:-${HOME:-}/.config/cursor/auth.json}"
+}
+
+warn_harbor_cursor_auth() {
   [ "$TB_AGENT" = cursor-cli ] || return 0
   load_tb_env 2>/dev/null || true
   if [ -n "${CURSOR_API_KEY:-}" ]; then
     return 0
   fi
-  echo "Harbor cursor-cli runs agent inside Docker and needs CURSOR_API_KEY on the host." >&2
-  echo "Create a key in Cursor → Settings → API, then either:" >&2
-  echo "  export CURSOR_API_KEY=..." >&2
-  echo "  or put it in bench/terminal-bench/.env.local (see env.example)" >&2
-  exit 2
+  auth=$(cursor_auth_file)
+  if [ -f "$auth" ]; then
+    echo "note: mounting $(cursor_auth_file) into Harbor (OAuth from agent login)." >&2
+    echo "      Stock cursor-cli may still require CURSOR_API_KEY — see README." >&2
+    return 0
+  fi
+  echo "note: Harbor cursor-cli in Docker; using --skip-credential-checks." >&2
+  echo "      Set CURSOR_API_KEY in .env.local only if trials fail (see env.example)." >&2
 }
 
 require_harbor() {
@@ -56,7 +63,7 @@ harbor_run() {
   load_tb_env 2>/dev/null || true
   require_harbor
   require_docker
-  require_cursor_api_key
+  warn_harbor_cursor_auth
   mkdir -p "$TB_JOBS_DIR"
   job_name="${TB_JOB_PREFIX:-tb}-${mode}-$(date +%Y%m%d-%H%M%S)"
   set -- harbor run \
@@ -70,6 +77,18 @@ harbor_run() {
     "$@"
   if [ "$TB_AGENT" != oracle ]; then
     set -- "$@" -m "$TB_MODEL"
+  fi
+  if [ "$TB_AGENT" = cursor-cli ]; then
+    case ${TB_MOUNT_CURSOR_AUTH:-auto} in
+      0|false|no|off) ;;
+      *)
+        auth=$(cursor_auth_file)
+        if [ -f "$auth" ]; then
+          mounts='[{"type":"bind","source":"'"$auth"'","target":"/root/.config/cursor/auth.json","read_only":true}]'
+          set -- "$@" --mounts "$mounts"
+        fi
+        ;;
+    esac
   fi
   # Harbor preflight wants CURSOR_API_KEY; local `agent` may already be logged in.
   if [ "$TB_AGENT" = cursor-cli ] && [ -z "${CURSOR_API_KEY:-}" ]; then
