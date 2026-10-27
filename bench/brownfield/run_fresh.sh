@@ -31,8 +31,9 @@ case $(bench_cli) in
   claude) plog="$LOGS/plan.json" ;;
   *) plog="$LOGS/plan.jsonl" ;;
 esac
-bench_invoke "$OUT" "$plog" "$plan_prompt" "$((RUN_TIMEOUT + 600))"
-"$WTEAM" --root "$OUT" --slug bench pickup >"$LOGS/pickup.txt" 2>&1
+agent_ec=0
+bench_invoke "$OUT" "$plog" "$plan_prompt" "$((RUN_TIMEOUT + 600))" || agent_ec=$?
+"$WTEAM" --root "$OUT" --slug bench pickup >"$LOGS/pickup.txt" 2>&1 || true
 
 n=0
 for f in "$OUT/.wteam/bench/tickets"/[0-9]*.md; do
@@ -51,12 +52,12 @@ Implement this ticket, then stop."
     claude) tlog="$LOGS/fresh-${id}.json" ;;
     *) tlog="$LOGS/fresh-${id}.jsonl" ;;
   esac
-  bench_invoke "$OUT" "$tlog" "$PROMPT" "$RUN_TIMEOUT"
+  bench_invoke "$OUT" "$tlog" "$PROMPT" "$RUN_TIMEOUT" || agent_ec=$?
 done
-[ "$n" -gt 0 ] || {
+if [ "$n" -eq 0 ]; then
   echo "no tickets planned" >&2
-  exit 2
-}
+  agent_ec=2
+fi
 
 end=$(date +%s)
 {
@@ -66,5 +67,7 @@ end=$(date +%s)
   echo "fresh_ticket_runs $n"
   echo "bench_task brownfield"
   echo "bench_cli $(bench_cli)"
+  echo "agent_exit $agent_ec"
 } >"$LOGS/metrics.txt"
-brownfield_finish_run "$LOGS" "$OUT" "$HERE"
+brownfield_finish_run "$LOGS" "$OUT" "$HERE" || true
+exit "$agent_ec"

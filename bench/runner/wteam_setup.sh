@@ -15,8 +15,11 @@ bench_write_agent() {
   {
     printf 'name = "%s"\ncli = "%s"\nmodel = "%s"\nprompt = "%s"\nprofile = "%s"\n' \
       "$role" "$cli" "$model" "$role" "$profile"
-    [ -n "$extra" ] && printf '%s\n' "$extra"
+    if [ -n "$extra" ]; then
+      printf '%s\n' "$extra"
+    fi
   } >"$out/.wteam/agents/$role.toml"
+  return 0
 }
 
 bench_setup_wteam_agents() {

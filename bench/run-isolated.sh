@@ -24,4 +24,7 @@ exec /usr/bin/env -i \
   "TB_SKIP_CREDENTIAL_CHECKS=${TB_SKIP_CREDENTIAL_CHECKS:-}" \
   "TB_JOB_PREFIX=${TB_JOB_PREFIX:-}" \
   "TB_RUN_BASE=${TB_RUN_BASE:-}" \
+  "TB_HARNESS_DIR=${TB_HARNESS_DIR:-}" \
+  "PYTHONPATH=${PYTHONPATH:-}" \
+  "BENCH_REVIEW=${BENCH_REVIEW:-}" \
   /bin/sh -c 'exec "$@"' _ "$@"

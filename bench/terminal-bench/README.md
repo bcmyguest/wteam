@@ -26,11 +26,11 @@ Harbor’s **`cursor-cli`** runs **inside Docker**. By default we **bind-mount**
 
 ## Quick start
 
-Prefer **[`bench/spin-up/run.sh`](../spin-up/run.sh)** — one command, OAuth bind, log file:
+For **wteam harness** benches (continuous / fresh / team), use **[`bench/spin-up/run.sh`](../spin-up/run.sh)** (`harness`, `harness-brownfield`). TB here is **external** only:
 
 ```bash
-sh bench/spin-up/run.sh tb-smoke 1
-sh bench/spin-up/run.sh tb-cursor 5
+sh bench/spin-up/run.sh external-tb-smoke 1
+sh bench/spin-up/run.sh external-tb-cursor 5
 ```
 
 Manual:

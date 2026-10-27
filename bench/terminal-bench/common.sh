@@ -5,7 +5,7 @@ TB_BENCH=$(cd "$(dirname "$0")" && pwd)
 export TB_DATASET=${TB_DATASET:-terminal-bench/terminal-bench}
 export TB_JOBS_DIR=${TB_JOBS_DIR:-$TB_BENCH/jobs}
 export TB_AGENT=${TB_AGENT:-cursor-cli}
-export TB_MODEL=${TB_MODEL:-${BENCH_MODEL:-composer-2.5}}
+export TB_MODEL=${TB_MODEL:-${BENCH_MODEL:-auto}}
 export TB_N_CONCURRENT=${TB_N_CONCURRENT:-1}
 export TB_N_ATTEMPTS=${TB_N_ATTEMPTS:-1}
 

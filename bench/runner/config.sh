@@ -1,6 +1,11 @@
 # Bench runner configuration (any wteam-supported CLI).
 # shellcheck shell=sh
-RUNNER=$(cd "$(dirname "$0")" && pwd)
+_script_dir=$(cd "$(dirname "$0")" && pwd)
+if [ -f "$_script_dir/invoke.sh" ]; then
+  RUNNER=$_script_dir
+else
+  RUNNER=$(cd "$_script_dir/../runner" && pwd)
+fi
 COMMIT0=$(cd "$RUNNER/../commit0" && pwd)
 POLYGLOT=$(cd "$RUNNER/../polyglot" && pwd)
 BF=$(cd "$RUNNER/../brownfield" && pwd)
@@ -13,7 +18,7 @@ bench_cli() {
 bench_default_model() {
   case $(bench_cli) in
     claude) printf '%s\n' haiku ;;
-    cursor) printf '%s\n' composer-2.5 ;;
+    cursor) printf '%s\n' auto ;;
     codex) printf '%s\n' "${BENCH_CODEX_MODEL:-}" ;;
     *) printf '%s\n' "${BENCH_MODEL:-default}" ;;
   esac

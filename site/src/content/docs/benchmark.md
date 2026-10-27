@@ -3,7 +3,7 @@ title: Benchmark
 description: wteam against single-agent baselines on Aider's polyglot benchmark and larger multi-ticket tasks — what multi-agent coordination buys, and what it does not.
 ---
 
-One run per configuration on 2026-10-22, so treat differences of one or two exercises as noise.
+One run per configuration on 2026-10-22 and 2026-10-27, so treat differences of one or two exercises as noise.
 The harness is in [`bench/polyglot/`](https://github.com/bcmyguest/wteam/tree/main/bench/polyglot); it uses the shared [`bench/runner/`](https://github.com/bcmyguest/wteam/tree/main/bench/runner) so you can set **`BENCH_CLI`** (`cursor`, `claude`, `codex`, …) and rerun with your models.
 
 wteam optimizes **controlled parallel delivery and reviewable ownership**, not minimum token cost.
@@ -37,6 +37,8 @@ Fresh-context Goldfish phases (`wteam phase plan-review` / `wteam phase validate
 | wteam, Haiku workers + Haiku reviewers, model orchestrator | 20/34 | 428 s | $3.09 |
 | wteam, Haiku workers + Haiku reviewers, auto dispatch | 20/34 | 334 s | $1.92 |
 | wteam, Haiku workers + **Sonnet reviewers**, auto dispatch | **28/34** | 351 s | $12.23 |
+
+On 2026-10-27, both Codex arms used `gpt-6-sol` with hidden tests and all 34 exercises. The team used four pairs, auto dispatch, and an autopass reviewer; these runs did not report cost. The single session passed 24/34 in 383 s, while wteam passed 26/34 in 613 s. The two-exercise gap comes from one run per arm and does not establish a reliable pass-rate difference. [Full results and failing exercises](https://github.com/bcmyguest/wteam/blob/main/bench/polyglot/results/hidden-codex-2026-10-27.md).
 
 ### Visible tests
 

@@ -24,7 +24,8 @@ case $(bench_cli) in
   claude) log="$LOGS/result.json" ;;
   *) log="$LOGS/run.jsonl" ;;
 esac
-bench_invoke "$OUT" "$log" "$PROMPT" "${RUN_TIMEOUT:-1800}"
+agent_ec=0
+bench_invoke "$OUT" "$log" "$PROMPT" "${RUN_TIMEOUT:-1800}" || agent_ec=$?
 end=$(date +%s)
 {
   echo "wall_seconds $((end - start))"
@@ -32,5 +33,7 @@ end=$(date +%s)
   echo "bench_context continuous"
   echo "bench_task brownfield"
   echo "bench_cli $(bench_cli)"
+  echo "agent_exit $agent_ec"
 } >"$LOGS/metrics.txt"
-brownfield_finish_run "$LOGS" "$OUT" "$HERE"
+brownfield_finish_run "$LOGS" "$OUT" "$HERE" || true
+exit "$agent_ec"

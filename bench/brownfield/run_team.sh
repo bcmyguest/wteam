@@ -33,12 +33,13 @@ case $(bench_cli) in
   claude) plog="$LOGS/plan.json" ;;
   *) plog="$LOGS/plan.jsonl" ;;
 esac
-bench_invoke "$OUT" "$plog" "$plan_prompt" "$((RUN_TIMEOUT + 600))"
+agent_ec=0
+bench_invoke "$OUT" "$plog" "$plan_prompt" "$((RUN_TIMEOUT + 600))" || agent_ec=$?
 plan_end=$(date +%s)
-"$WTEAM" --root "$OUT" --slug bench pickup >"$LOGS/pickup.txt" 2>&1
+"$WTEAM" --root "$OUT" --slug bench pickup >"$LOGS/pickup.txt" 2>&1 || true
 timeout $((RUN_TIMEOUT + 600)) "$WTEAM" --root "$OUT" --slug bench run --pairs "$PAIRS" \
   --isolation "$ISOLATION" --dispatch auto --replan --timeout "$RUN_TIMEOUT" --max-turns 200 \
-  >"$LOGS/run.txt" 2>&1
+  >"$LOGS/run.txt" 2>&1 || agent_ec=$?
 end=$(date +%s)
 {
   echo "wall_seconds $((end - start))"
@@ -50,5 +51,7 @@ end=$(date +%s)
   echo "bench_isolation $ISOLATION"
   echo "bench_review ${BENCH_REVIEW:-autopass}"
   echo "bench_pairs $PAIRS"
+  echo "agent_exit $agent_ec"
 } >"$LOGS/metrics.txt"
-brownfield_finish_run "$LOGS" "$OUT" "$HERE"
+brownfield_finish_run "$LOGS" "$OUT" "$HERE" || true
+exit "$agent_ec"

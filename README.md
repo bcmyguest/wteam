@@ -23,7 +23,7 @@ wteam optimizes controlled parallel delivery and reviewable ownership, not minim
 | wteam, Haiku workers + Haiku reviewers | 20/34 | 334 s | $1.92 |
 | wteam, Haiku workers + Sonnet reviewers | 28/34 | 351 s | $12.23 |
 
-Measured wins on that suite: four pairs beat single Haiku on wall time at the same score; Sonnet reviewers raised Haiku workers to 28/34 (above single Sonnet). On larger same-test greenfield tasks, blind review preferred wteam’s structure. Full method, literature context, and caveats: [benchmark page](https://bcmyguest.github.io/wteam/benchmark/) and `bench/polyglot/`. Larger multi-ticket tables: `bench/results/2026-10-22.md`.
+Measured wins on that suite: four pairs beat single Haiku on wall time at the same score; Sonnet reviewers raised Haiku workers to 28/34 (above single Sonnet). A 2026-10-27 Codex `gpt-6-sol` run scored 24/34 for one session and 26/34 for four autopass pairs; one run per arm cannot establish a pass-rate difference. On larger same-test greenfield tasks, blind review preferred wteam’s structure. Full method, literature context, and caveats: [benchmark page](https://bcmyguest.github.io/wteam/benchmark/) and `bench/polyglot/`. Larger multi-ticket tables: `bench/results/2026-10-22.md`.
 
 Fresh-context “Goldfish” phases (`wteam phase plan-review` / `wteam phase validate`) follow the same idea as Google’s [Elephant-Goldfish Model](https://github.com/google/elephant-goldfish-model) ([announcement](https://opensource.googleblog.com/2026/10/introducing-elephant-goldfish-model-plugin.html)): deep Elephant context (planner / orchestrator), then isolated critics on the artifact. New workflows are roles + a persona list; the CLI keeps stamps and restarts, not the loop brains.
 
