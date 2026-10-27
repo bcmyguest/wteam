@@ -15,7 +15,7 @@ if command -v asciinema >/dev/null && command -v agg >/dev/null && command -v tm
   export TERM="${TERM:-xterm-256color}"
   cast="$SITE/demo/.cache/demo.cast"
   mkdir -p "$(dirname "$cast")"
-  asciinema rec -y --cols 120 --rows 36 -c "sh demo/play.sh" -t "wteam demo" --overwrite "$cast"
+  asciinema rec -y --cols 120 --rows 40 -c "sh demo/play.sh" -t "wteam demo" --overwrite "$cast"
   trimmed="$SITE/demo/.cache/demo.trimmed.cast"
   sh "$SITE/demo/trim-cast.sh" "$cast" "$trimmed" >/dev/null
   agg --font-size 14 --last-frame-duration 2 "$trimmed" public/demo.gif

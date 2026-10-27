@@ -1,7 +1,7 @@
 # Landing demo (asciinema + agg)
 
 Scripted stand-in agents run a small greet-CLI effort. **Source of truth:**
-`play.sh` (tmux split + `main.sh`).
+`play.sh` (tmux: run + tickets + agents panes, `main.sh` in run).
 
 ```bash
 # From repo root (builds wteam if needed):
