@@ -58,11 +58,26 @@ while true; do
 
   wteam --slug "$SLUG" status 2>/dev/null | awk '
   /^agents:/ { agents = 1; next }
-  agents && /^  / {
+  agents && /^  / && $1 != "total" {
     name = $1; run = $2;
+    tok = ""
+    if (match($0, /tokens=[0-9]+/)) {
+      tok = substr($0, RSTART + 7, RLENGTH - 7)
+    }
     mark = (run == "busy") ? "▸" : " "
-    printf " %s \033[1m%-14s\033[0m %s", mark, name, run
+    if (tok != "") {
+      printf " %s \033[1m%-14s\033[0m %-5s \033[2mtokens=%s\033[0m", mark, name, run, tok
+    } else {
+      printf " %s \033[1m%-14s\033[0m %s", mark, name, run
+    }
     print ""
+    next
+  }
+  /^  total tokens=/ {
+    if (match($0, /tokens=[0-9]+/)) {
+      printf " \033[2mtotal tokens\033[0m %s", substr($0, RSTART + 7, RLENGTH - 7)
+      print ""
+    }
   }
   ' | while IFS= read -r row; do
     dash_line "$row"

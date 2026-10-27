@@ -17,6 +17,8 @@ for r in orchestrator worker reviewer; do
 done
 cat > .wteam-fake/orchestrator.sh <<'S'
 wteam ready | awk '/^[0-9]/{print $1}' | while read t; do wteam dispatch "$t" >/dev/null 2>&1 || true; done
+printf 'session: %s\n' "${WTEAM_AGENT:-orchestrator.1}"
+echo "tokens: 2400"
 S
 cat > .wteam-fake/worker.sh <<'S'
 T=$(wteam status | awk -v a="$WTEAM_AGENT" '$NF==a && /\[doing\]/ {print $1; exit}')
@@ -60,9 +62,14 @@ PY
   ;;
 esac
 wteam submit "$T" --summary "implemented $T"
+n=$(printf '%s' "$T" | sed 's/^0*//')
+printf 'session: %s-%s\n' "$WTEAM_AGENT" "$T"
+echo "tokens: $((9000 + n * 1200))"
 S
 cat > .wteam-fake/reviewer.sh <<'S'
 T=$(wteam status | awk -v a="$WTEAM_AGENT" '$NF==a && /\[review\]/ {print $1; exit}')
 sleep 1
 wteam verdict "$T" pass
+printf 'session: %s-%s\n' "$WTEAM_AGENT" "$T"
+echo "tokens: 3800"
 S
