@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds the repo the demo GIF records: git init + wteam init; tickets come from
-# `wteam tickets add` in demo.tape (scripted stand-in agents for the run).
+# Tickets are added in demo/main.sh via seed-tickets.sh (scripted stand-in agents).
 set -eu
 D="${1:-/tmp/wteam-demo}"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -9,8 +9,8 @@ git init -q -b main
 git config user.email demo@example.com && git config user.name demo
 echo "# demo" > README.md && git add -A && git commit -qm "chore: init"
 wteam --slug demo init >/dev/null
-cp "$SCRIPT_DIR/dashboard.sh" "$SCRIPT_DIR/tmux-start.sh" "$SCRIPT_DIR/seed-tickets.sh" "$D/"
-chmod +x "$D/dashboard.sh" "$D/tmux-start.sh" "$D/seed-tickets.sh"
+cp "$SCRIPT_DIR/dashboard.sh" "$SCRIPT_DIR/seed-tickets.sh" "$D/"
+chmod +x "$D/dashboard.sh" "$D/seed-tickets.sh"
 mkdir -p .wteam/agents .wteam-fake
 for r in orchestrator worker reviewer; do
   printf 'name = "%s"\ncli = "fake"\nprompt = "%s"\nprofile = "edit"\n' $r $r > .wteam/agents/$r.toml

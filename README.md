@@ -232,8 +232,10 @@ The docs site lives in `site/` (Astro + Starlight):
 cd site && pnpm install && pnpm build
 ```
 
-The demo GIF (`site/public/demo.gif`) is rendered from `site/demo.tape` with
-`vhs` (scripted stand-in agents from `site/demo/setup.sh`):
+The demo GIF (`site/public/demo.gif`) is recorded from `site/demo/play.sh` with
+[asciinema](https://asciinema.org/) and [agg](https://github.com/asciinema/agg)
+(scripted stand-in agents from `site/demo/setup.sh`). Docker is used when
+`asciinema`, `agg`, and `tmux` are not on `PATH`:
 
 ```bash
 sh site/demo/render.sh
