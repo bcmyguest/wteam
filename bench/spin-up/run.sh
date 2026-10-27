@@ -59,7 +59,7 @@ case $target in
     n=${1:-5}
     base="${TB_RUN_BASE:-/tmp/wteam-tb-cursor-$(date +%Y%m%d-%H%M%S)}"
     mkdir -p "$base"
-    export TB_JOBS_DIR="${TB_JOBS_DIR:-$base/jobs}"
+    export TB_JOBS_DIR="$base/jobs"
     export TB_AGENT=acp:cursor
     export TB_MODEL="${TB_MODEL:-${BENCH_MODEL:-cursor/composer-2.5}}"
     export TB_MOUNT_CURSOR_AUTH="${TB_MOUNT_CURSOR_AUTH:-auto}"

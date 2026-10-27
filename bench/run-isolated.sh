@@ -16,4 +16,12 @@ exec /usr/bin/env -i \
   "BENCH_CLI=${BENCH_CLI:-}" \
   "BENCH_MODEL=${BENCH_MODEL:-}" \
   "CURSOR_API_KEY=${CURSOR_API_KEY:-}" \
+  "TB_AGENT=${TB_AGENT:-}" \
+  "TB_MODEL=${TB_MODEL:-}" \
+  "TB_JOBS_DIR=${TB_JOBS_DIR:-}" \
+  "TB_DATASET=${TB_DATASET:-}" \
+  "TB_MOUNT_CURSOR_AUTH=${TB_MOUNT_CURSOR_AUTH:-}" \
+  "TB_SKIP_CREDENTIAL_CHECKS=${TB_SKIP_CREDENTIAL_CHECKS:-}" \
+  "TB_JOB_PREFIX=${TB_JOB_PREFIX:-}" \
+  "TB_RUN_BASE=${TB_RUN_BASE:-}" \
   /bin/sh -c 'exec "$@"' _ "$@"
