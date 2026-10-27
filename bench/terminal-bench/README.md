@@ -26,12 +26,22 @@ Harbor’s **`cursor-cli`** runs **inside Docker**. By default we **bind-mount**
 
 ## Quick start
 
+Prefer **[`bench/spin-up/run.sh`](../spin-up/run.sh)** — one command, OAuth bind, log file:
+
+```bash
+sh bench/spin-up/run.sh tb-smoke 1
+sh bench/spin-up/run.sh tb-cursor 5
+```
+
+Manual:
+
 ```bash
 # 1) Oracle smoke (1 task, no model spend)
 sh bench/terminal-bench/run_smoke.sh 1
 
-# 2) Cursor on first 5 tasks
-export TB_MODEL=composer-2.5   # or harbor’s model string for cursor-cli
+# 2) Cursor on first 5 tasks (login-first: acp:cursor via spin-up, or cursor-cli + optional API key)
+export TB_MODEL=cursor/composer-2.5
+export TB_AGENT=acp:cursor
 sh bench/terminal-bench/run_continuous.sh 5
 
 # 3) One named task

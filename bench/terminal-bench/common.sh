@@ -28,7 +28,7 @@ cursor_auth_file() {
 }
 
 warn_harbor_cursor_auth() {
-  [ "$TB_AGENT" = cursor-cli ] || return 0
+  case $TB_AGENT in cursor-cli|acp:cursor) ;; *) return 0 ;; esac
   load_tb_env 2>/dev/null || true
   if [ -n "${CURSOR_API_KEY:-}" ]; then
     return 0
@@ -78,17 +78,22 @@ harbor_run() {
   if [ "$TB_AGENT" != oracle ]; then
     set -- "$@" -m "$TB_MODEL"
   fi
-  if [ "$TB_AGENT" = cursor-cli ]; then
-    case ${TB_MOUNT_CURSOR_AUTH:-auto} in
-      0|false|no|off) ;;
-      *)
-        auth=$(cursor_auth_file)
-        if [ -f "$auth" ]; then
-          mounts='[{"type":"bind","source":"'"$auth"'","target":"/root/.config/cursor/auth.json","read_only":true}]'
-          set -- "$@" --mounts "$mounts"
-        fi
-        ;;
-    esac
+  case $TB_AGENT in
+    cursor-cli|acp:cursor)
+      case ${TB_MOUNT_CURSOR_AUTH:-auto} in
+        0|false|no|off) ;;
+        *)
+          auth=$(cursor_auth_file)
+          if [ -f "$auth" ]; then
+            mounts='[{"type":"bind","source":"'"$auth"'","target":"/root/.config/cursor/auth.json","read_only":true}]'
+            set -- "$@" --mounts "$mounts"
+          fi
+          ;;
+      esac
+      ;;
+  esac
+  if [ "$TB_AGENT" = acp:cursor ]; then
+    set -- "$@" --ak authenticate_method_id=cursor_login
   fi
   # Harbor preflight wants CURSOR_API_KEY; local `agent` may already be logged in.
   if [ "$TB_AGENT" = cursor-cli ] && [ -z "${CURSOR_API_KEY:-}" ]; then
