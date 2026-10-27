@@ -94,10 +94,44 @@ write_reviewer_agent() {
   fi
 }
 
+install_bench_plan_review() {
+  OUT=$1
+  mkdir -p "$OUT/.wteam/roles"
+  cat >"$OUT/.wteam/roles/spec-critic.md" <<'EOF'
+# spec-critic (brownfield benchmark)
+
+Fresh session — antagonistic review of a wteam plan. You never saw the planner's chat.
+
+## Job
+
+1. Read `spec.md` and every ticket under `tickets/`. You may Read the repo to check paths.
+2. Hunt for **blocking** plan defects only: bad `Blocked by`, missing Files/Verify, contradictions, wrong Context.
+3. FAIL with concrete `- ` bullets when an implementer would be blocked or misled. PASS when coherent enough to build.
+
+## Brownfield Verify rules
+
+This repo has `sh .wteam/bench/hidden_gate.sh` (pinned fmt + integration suite).
+
+- **PASS** Verify that runs a whole test binary (`cargo test --test watcher`, `cargo test --test parallel fill_`, `cargo test --test docs`) or the hidden gate. Do not FAIL because Verify omits every substring test name.
+- **PASS** a docs ticket whose Verify is `cargo test --test docs` when another ticket or the spec names `hidden_gate.sh` for the full outcome.
+- **FAIL** Verify that is empty, not runnable, or points at commands that do not exist in the repo.
+
+Put speculative coupling under `NOTES:`, not FINDINGS.
+
+## Rules
+
+- Do not edit source code. Write only under `.wteam/` (findings file).
+- Run exactly one command per shell call: no `&&`, `;` or `|`.
+- Finish with `wteam phase-verdict pass|fail --file <path>` (or plan-verdict for plan-review).
+- The file must contain `FINDINGS:`; FAIL needs at least one bullet.
+EOF
+}
+
 install_bench_gate() {
   OUT=$1
   BENCH=$2
   install_bench_brief "$OUT"
+  install_bench_plan_review "$OUT"
   mkdir -p "$OUT/.wteam/bench" "$OUT/.wteam/roles"
   cat >"$OUT/.wteam/bench/hidden_gate.sh" <<EOF
 #!/bin/sh

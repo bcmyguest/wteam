@@ -73,6 +73,14 @@ Root causes (measurement vs product):
 4. fmt drift in agent-edited tests (e.g. git_locks.rs) is agent/harness hygiene; gate
    correctly fails fmt before tests.
 
+Full bench (2026-10-26, harness 94193d6, /tmp/wteam-bf-full-20261026):
+  single      177s   1 turn    1.26M tokens   grade FAIL (fill ok; roles+watcher)
+  team       1181s  10 turns  12.7M tokens   grade PASS (one-shot)
+  planreview 1277s  13 turns   7.7M tokens   plan-review FAIL after 4 attempts
+                (spec-critic: Verify lines too narrow; never reached run)
+
+Plan-review fix (same day): planning.md + bench spec-critic override + rewrite cap 4.
+
 Framework follow-ups (not all implemented here):
 - Spec Verify / phase validate: optional project gate command (e.g. hidden_gate.sh).
 - Orchestrator validate loop: requeue + short run belongs in role/skill; harness

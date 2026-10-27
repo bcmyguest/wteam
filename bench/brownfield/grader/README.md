@@ -27,3 +27,6 @@ the same pinned suite (checkout `cargo test` alone is not the gate).
 Default bench run uses `--isolation none` (grade reads **main**), harness
 `wteam` on PATH, and `WTEAM_BENCH_REVIEW=autopass` (fake reviewer) unless set
 to `cursor`.
+
+Plan-review installs a project `spec-critic` role and `planning.md` planner
+hints so critics accept whole-test Verify lines and `hidden_gate.sh`.

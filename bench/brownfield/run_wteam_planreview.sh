@@ -16,7 +16,7 @@ WORKER_MODEL=${WTEAM_BENCH_WORKER_MODEL:-$MODEL}
 REVIEWER_MODEL=${WTEAM_BENCH_REVIEWER_MODEL:-$MODEL}
 SPEC_LIGHT=${WTEAM_BENCH_SPEC_LIGHT_MODEL:-$MODEL}
 SPEC_HEAVY=${WTEAM_BENCH_SPEC_HEAVY_MODEL:-$MODEL}
-REWRITE_CAP=${WTEAM_BENCH_PLAN_REWRITE_CAP:-3}
+REWRITE_CAP=${WTEAM_BENCH_PLAN_REWRITE_CAP:-4}
 RUN_TIMEOUT=${RUN_TIMEOUT:-1800}
 ISOLATION=${WTEAM_BENCH_ISOLATION:-none}
 
@@ -41,13 +41,17 @@ write_agent spec-critic plan "$SPEC_HEAVY"
 write_agent spec-readiness plan "$SPEC_HEAVY"
 
 GOAL=$(cat "$HERE/task.md")
+PLANNING=$(cat "$HERE/planning.md")
 PLAN_PROMPT="$("$WTEAM" --root "$OUT" --slug bench role planner)
 
 Goal:
 $GOAL
 
 Slug: bench
-Write the spec and 2-6 implementation tickets under .wteam/bench/. Use the existing code and tests for Context and Verify. Finish only after wteam --slug bench pickup reports no problems."
+Write the spec and 2-6 implementation tickets under .wteam/bench/. Use the existing code and tests for Context and Verify. Finish only after wteam --slug bench pickup reports no problems.
+
+Planning contract (follow for Verify: lines and ticket split):
+$PLANNING"
 START=$(date +%s)
 timeout "$((RUN_TIMEOUT + 600))" agent -p --output-format stream-json --trust --force \
   --model "$MODEL" --workspace "$OUT" "$PLAN_PROMPT" \
@@ -81,6 +85,9 @@ Rules for this rewrite:
 - Do not expand scope; prefer deleting a bad claim over adding a new one.
 - Keep Context/Verify grounded in the existing repo.
 Then run wteam --slug bench pickup until clean.
+
+Planning contract (Verify patterns):
+$PLANNING
 
 Findings:
 $FINDINGS"
