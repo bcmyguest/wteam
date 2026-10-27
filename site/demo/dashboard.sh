@@ -37,7 +37,8 @@ while true; do
     sub(/  \[[^]]+\].*/, "", title)
     agent = ""
     if (match($0, /assignee=[^ ]+/)) {
-      agent = substr($0, RSTART + 10, RLENGTH - 10)
+      agent = substr($0, RSTART, RLENGTH)
+      sub(/^assignee=/, "", agent)
     }
     icon = "○"
     if (st == "doing") icon = "◉"
