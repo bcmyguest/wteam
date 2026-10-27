@@ -68,8 +68,5 @@ while true; do
     dash_line "$row"
   done
 
-  dash_line '\033[2m────────────────────────────────────────\033[0m'
-  dash_line ' \033[2mrefreshing…\033[0m'
-
-  sleep 0.8
+  sleep 1
 done
