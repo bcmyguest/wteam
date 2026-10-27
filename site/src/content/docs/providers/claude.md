@@ -51,5 +51,5 @@ Matrix detail: [Permissions](../permissions/).
 
 ## See also
 
-- [Architecture — adapters](../architecture/#agent-adapters)
+- [Architecture](../architecture/)
 - [Benchmark](../benchmark/) (Commit0 baseline uses Claude)

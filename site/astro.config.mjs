@@ -34,10 +34,24 @@ export default defineConfig({
             { label: 'Cursor', slug: 'providers/cursor' },
           ],
         },
-        { label: 'Architecture', slug: 'architecture' },
+        {
+          label: 'Architecture',
+          items: [
+            { label: 'Overview', slug: 'architecture' },
+            {
+              label: 'Mail routing',
+              items: [
+                { label: 'Overview', slug: 'architecture/routing' },
+                { label: 'pair', slug: 'architecture/routing/pair' },
+                { label: 'broadcast', slug: 'architecture/routing/broadcast' },
+                { label: 'fan-in', slug: 'architecture/routing/fan-in' },
+              ],
+            },
+          ],
+        },
         { label: 'Permissions', slug: 'permissions' },
         { label: 'Benchmark', slug: 'benchmark' },
-        { label: 'CLI and files', slug: 'reference' },
+        { label: 'Reference', slug: 'reference' },
       ],
       customCss: ['./src/custom.css'],
       lastUpdated: false,

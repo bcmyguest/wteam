@@ -1,6 +1,6 @@
 ---
-title: CLI and files
-description: Subcommands, team.dot attributes, agent and profile TOML.
+title: Reference
+description: CLI commands, team.dot attributes, agent and profile TOML, and `.wteam/` layout.
 ---
 
 Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
@@ -64,7 +64,7 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `script` | command node | Script run from the repo root |
 | `timeout` | command node | Seconds before the script counts as failed. Default 600. |
 | `on` | edge | Event: `dispatch`, `submit`, `pass`, `fail`, `blocked`, `message` |
-| `kind` | edge | `pair`, `broadcast` or `fan-in`. Default `pair`. |
+| `kind` | edge | `pair`, `broadcast` or `fan-in`. Default `pair`. See [Mail routing](../architecture/routing/). |
 
 ## Agent TOML
 
@@ -84,7 +84,7 @@ extra_args = []      # passed through to the CLI after adapter flags
 OpenCode models use `provider/model` (`-m`). Pi uses `pi --mode json` with
 `--append-system-prompt` on the first turn and `--session` on resume. See
 [Providers](../providers/) for install, resume flags and JSONL detail;
-[Architecture](../architecture/#agent-adapters) for shims and fixtures.
+[Architecture](../architecture/#internals-contributors) for module map and test shims.
 
 ## Profile TOML
 

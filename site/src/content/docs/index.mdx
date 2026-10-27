@@ -4,7 +4,7 @@ description: Portable worker/reviewer teams for coding agents
 template: splash
 hero:
   title: wteam
-  tagline: Worker/reviewer teams for coding agents, driven from one repo and one CLI.
+  tagline: Simple worker teams for your coding agents.
   actions:
     - text: Quickstart
       link: ./quickstart/
@@ -14,16 +14,18 @@ hero:
       variant: minimal
 ---
 
+![wteam demo: `wteam tickets add`, live agent dashboard, `wteam run --pairs 2`, then commits](/wteam/demo.gif)
+
 wteam turns a set of planned tickets into work done by pairs of agents. Each
 worker implements one ticket. A reviewer checks the result against the ticket
 and either passes it or sends it back. The orchestrator dispatches tickets and
 the reviewer's verdicts decide what commits.
 
-Agents talk through append-only mailboxes in `.wteam/`. The CLI works the same for Claude Code, Codex, OpenCode, Pi and Cursor; see
-[Providers](./providers/) for per-CLI setup. Permission profiles map differently
-per CLI — [Permissions](./permissions/) and [Architecture](./architecture/#agent-adapters).
+Agents talk through append-only mailboxes in `.wteam/`. The CLI works the same
+for Claude Code, Codex, OpenCode, Pi and Cursor; see [Providers](./providers/)
+for per-CLI setup. Permission profiles map differently per CLI —
+[Permissions](./permissions/) and [Architecture](./architecture/).
 
-![wteam demo: `wteam tickets add`, live agent dashboard, `wteam run --pairs 2`, then commits](/wteam/demo.gif)
-
-The demo uses scripted stand-in agents so it is fast and repeatable; real runs drive
-Claude Code, Codex, OpenCode or Pi. See [Benchmark](./benchmark/) for measured runs with real models.
+The demo uses scripted stand-in agents so it is fast and repeatable; real runs
+drive Claude Code, Codex, OpenCode or Pi. See [Benchmark](./benchmark/) for
+measured runs with real models.

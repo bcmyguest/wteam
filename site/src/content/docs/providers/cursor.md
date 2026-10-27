@@ -49,5 +49,5 @@ scope to path globs (for example `scratch/**` for reviewers). See
 
 ## See also
 
-- [Architecture — adapters](../architecture/#agent-adapters)
+- [Architecture](../architecture/)
 - [Benchmark](../benchmark/) (`BENCH_CLI=cursor` default in the shared runner)

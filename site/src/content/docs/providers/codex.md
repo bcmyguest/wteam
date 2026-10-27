@@ -53,5 +53,5 @@ anchor `.wteam` on the main repo via `WTEAM_ROOT`.
 
 ## See also
 
-- [Architecture — adapters](../architecture/#agent-adapters)
+- [Architecture](../architecture/)
 - [Permissions](../permissions/)

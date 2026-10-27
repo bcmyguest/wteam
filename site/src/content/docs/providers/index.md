@@ -18,5 +18,4 @@ syntax; see [Permissions](../permissions/) for how each CLI maps them.
 | `fake` | Tests only | — runs `sh $WTEAM_FAKE_DIR/<role>.sh` |
 
 Pick a provider page for install hints, TOML examples, resume flags, and
-permission quirks. Shared adapter behaviour (logs, shims, fixtures) is in
-[Architecture](../architecture/#agent-adapters).
+permission quirks. How turns and mail fit together: [Architecture](../architecture/).

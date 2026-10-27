@@ -47,6 +47,69 @@ function resetDiagram(el) {
   return true;
 }
 
+/** @returns {HTMLDialogElement} */
+function ensureLightbox() {
+  let dialog = document.getElementById('wteam-mermaid-lightbox');
+  if (dialog instanceof HTMLDialogElement) return dialog;
+
+  dialog = document.createElement('dialog');
+  dialog.id = 'wteam-mermaid-lightbox';
+  dialog.className = 'wteam-mermaid-lightbox';
+  dialog.innerHTML = `<div class="wteam-mermaid-lightbox__panel" role="document">
+    <button type="button" class="wteam-mermaid-lightbox__close" aria-label="Close diagram">×</button>
+    <div class="wteam-mermaid-lightbox__content"></div>
+  </div>`;
+  document.body.appendChild(dialog);
+
+  const close = () => dialog.close();
+  dialog.querySelector('.wteam-mermaid-lightbox__close')?.addEventListener('click', close);
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog) close();
+  });
+
+  return dialog;
+}
+
+function bindMermaidLightbox() {
+  const dialog = ensureLightbox();
+  const content = dialog.querySelector('.wteam-mermaid-lightbox__content');
+  if (!(content instanceof HTMLElement)) return;
+
+  for (const el of document.querySelectorAll('.mermaid')) {
+    if (!(el instanceof HTMLElement) || el.dataset.lightboxBound === '1') continue;
+    if (!el.querySelector('svg')) continue;
+
+    el.dataset.lightboxBound = '1';
+    el.classList.add('mermaid-zoomable');
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', 'Expand diagram');
+
+    const open = () => {
+      const svg = el.querySelector('svg');
+      if (!svg) return;
+      content.replaceChildren();
+      const clone = svg.cloneNode(true);
+      if (!(clone instanceof SVGElement)) return;
+      clone.removeAttribute('width');
+      clone.removeAttribute('height');
+      clone.style.width = '100%';
+      clone.style.maxWidth = 'min(96vw, 72rem)';
+      clone.style.height = 'auto';
+      content.appendChild(clone);
+      dialog.showModal();
+    };
+
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+  }
+}
+
 async function renderDiagrams() {
   mermaid.initialize(mermaidConfig(resolvedTheme()));
   const nodes = document.querySelectorAll('.mermaid');
@@ -55,6 +118,7 @@ async function renderDiagrams() {
   }
   if (nodes.length > 0) {
     await mermaid.run({ querySelector: '.mermaid' });
+    bindMermaidLightbox();
   }
 }
 

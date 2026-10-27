@@ -57,5 +57,5 @@ Optional: `WTEAM_OPENCODE_SMOKE_MODEL` (default `github-copilot/gemini-3.8-flash
 
 ## See also
 
-- [Architecture — adapters](../architecture/#agent-adapters)
+- [Architecture](../architecture/)
 - [Permissions](../permissions/)

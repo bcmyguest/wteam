@@ -19,7 +19,7 @@ Each role resolves to an **agent definition** (TOML): `cli`, optional `model`,
 `profile`, and `prompt`. Built-in CLIs are listed on [Providers](../providers/).
 wteam runs one headless adapter invocation per turn, resumes the stored session
 id when the CLI supports it, and parses assistant text plus token usage from stdout.
-See [Architecture](../architecture/#agent-adapters).
+See [Architecture](../architecture/#agent-turns).
 
 ## Team graph
 
@@ -39,8 +39,41 @@ digraph default {
 }
 ```
 
+With `--pairs 2`, wteam materializes two worker/reviewer pairs. The same edges
+apply; `dispatch` is **broadcast** (every worker), `submit`/`fail` stay within a
+pair, and `pass`/`blocked` **fan in** to the orchestrator:
+
+```mermaid
+flowchart TB
+  O[["orchestrator.1"]]
+  subgraph P1["Pair 1"]
+    W1[worker.1]
+    R1[reviewer.1]
+    W1 -->|submit| R1
+    R1 -->|fail| W1
+  end
+  subgraph P2["Pair 2"]
+    W2[worker.2]
+    R2[reviewer.2]
+    W2 -->|submit| R2
+    R2 -->|fail| W2
+  end
+  O -->|dispatch| W1
+  O -->|dispatch| W2
+  R1 -->|pass| O
+  R2 -->|pass| O
+  W1 -->|blocked| O
+  W2 -->|blocked| O
+```
+
+The [default preset](https://github.com/bcmyguest/wteam/blob/main/presets/default.dot)
+also declares a `planner` node for spec and ticket authoring; routing from the
+planner is configured in your own DOT when you wire it in.
+
 Node shapes: `box` is an agent role, `parallelogram` is a command (`script=`),
-and `hexagon` is a human gate. Edge `kind` defaults to `pair`. `count` defaults to 1.
+and `hexagon` is a human gate. Edge `kind` defaults to `pair` (`broadcast`,
+`fan-in` are the other options — see [Mail routing](../architecture/routing/)).
+`count` defaults to 1.
 `max_visits` caps review rounds: after that many failures, the ticket becomes `Blocked`.
 
 ### Gates

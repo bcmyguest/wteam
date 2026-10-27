@@ -29,9 +29,7 @@ wteam parses the same forms as Claude Code:
 | bare tool name | `Read` | Every use of that tool (no parentheses) |
 
 Glob `**` matches any path segment. Custom profiles under `.wteam/profiles/`
-may add any parseable rule; built-ins are defined in the wteam binary (see
-[`src/permissions/mod.rs`](https://github.com/bcmyguest/wteam/blob/main/src/permissions/mod.rs)
-`builtin()`).
+may add any parseable rule. The five built-in profiles below ship with wteam.
 
 ## Built-in profiles
 

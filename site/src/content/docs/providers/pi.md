@@ -48,5 +48,5 @@ WTEAM_PI_SMOKE=1 tests/smoke/capture-adapter-fixtures.sh
 
 ## See also
 
-- [Architecture — adapters](../architecture/#agent-adapters)
+- [Architecture](../architecture/)
 - [Permissions](../permissions/)
