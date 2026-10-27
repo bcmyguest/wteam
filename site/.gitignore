@@ -3,3 +3,4 @@ dist/
 .astro/
 public/vendor/
 demo/.cache/
+.wteam/
