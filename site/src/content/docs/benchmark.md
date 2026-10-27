@@ -93,7 +93,8 @@ Full tables and method: [`bench/results/2026-10-22.md`](https://github.com/bcmyg
 On greenfield work from a precise written spec, a single Haiku session matched wteam’s pass counts at 2–10× lower cost.
 Planning and parallel pairs did not raise the score when the agent already held every rule.
 Vague goals, changes to existing code, and debugging — where a single session tends to drift — are not covered by these tables.
-A brownfield harness lives in [`bench/brownfield/`](https://github.com/bcmyguest/wteam/tree/main/bench/brownfield); graded results from it are not published yet.
+Cursor + Composer runs (2026-10-26): [`bench/results/2026-10-26.md`](https://github.com/bcmyguest/wteam/blob/main/bench/results/2026-10-26.md) — brownfield **single FAIL / team PASS**, Commit0 `tinydb` three-way matrix, Terminal-Bench oracle smoke.
+A brownfield harness lives in [`bench/brownfield/`](https://github.com/bcmyguest/wteam/tree/main/bench/brownfield).
 
 ## Configurable runner (Commit0-style)
 

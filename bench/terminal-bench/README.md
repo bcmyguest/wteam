@@ -50,6 +50,7 @@ Results land under `bench/terminal-bench/jobs/` (or `TB_JOBS_DIR`). Inspect with
 | `TB_ENV` | unset (local Docker); set `modal` / `daytona` + API keys for cloud |
 | `TB_N_CONCURRENT` | `1` |
 | `TB_INCLUDE_TASK` | `-i` filter for one task name |
+| `TB_SKIP_CREDENTIAL_CHECKS` | `auto` (default): `--skip-credential-checks` when `cursor-cli` and no `CURSOR_API_KEY` |
 
 Direct Harbor equivalent:
 

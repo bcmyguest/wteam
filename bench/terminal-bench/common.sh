@@ -9,6 +9,33 @@ export TB_MODEL=${TB_MODEL:-${BENCH_MODEL:-composer-2.5}}
 export TB_N_CONCURRENT=${TB_N_CONCURRENT:-1}
 export TB_N_ATTEMPTS=${TB_N_ATTEMPTS:-1}
 
+# Optional: bench/terminal-bench/.env.local or ~/.config/cursor/harbor.env (gitignored)
+load_tb_env() {
+  for f in "$TB_BENCH/.env.local" "${HOME:-}/.config/cursor/harbor.env"; do
+    if [ -f "$f" ]; then
+      set -a
+      # shellcheck disable=SC1090
+      . "$f"
+      set +a
+      return 0
+    fi
+  done
+  return 1
+}
+
+require_cursor_api_key() {
+  [ "$TB_AGENT" = cursor-cli ] || return 0
+  load_tb_env 2>/dev/null || true
+  if [ -n "${CURSOR_API_KEY:-}" ]; then
+    return 0
+  fi
+  echo "Harbor cursor-cli runs agent inside Docker and needs CURSOR_API_KEY on the host." >&2
+  echo "Create a key in Cursor → Settings → API, then either:" >&2
+  echo "  export CURSOR_API_KEY=..." >&2
+  echo "  or put it in bench/terminal-bench/.env.local (see env.example)" >&2
+  exit 2
+}
+
 require_harbor() {
   command -v harbor >/dev/null 2>&1 || {
     echo "install: uv tool install harbor" >&2
@@ -26,8 +53,10 @@ require_docker() {
 harbor_run() {
   mode=$1
   shift
+  load_tb_env 2>/dev/null || true
   require_harbor
   require_docker
+  require_cursor_api_key
   mkdir -p "$TB_JOBS_DIR"
   job_name="${TB_JOB_PREFIX:-tb}-${mode}-$(date +%Y%m%d-%H%M%S)"
   set -- harbor run \
@@ -41,6 +70,12 @@ harbor_run() {
     "$@"
   if [ "$TB_AGENT" != oracle ]; then
     set -- "$@" -m "$TB_MODEL"
+  fi
+  # Harbor preflight wants CURSOR_API_KEY; local `agent` may already be logged in.
+  if [ "$TB_AGENT" = cursor-cli ] && [ -z "${CURSOR_API_KEY:-}" ]; then
+    case ${TB_SKIP_CREDENTIAL_CHECKS:-auto} in
+      1|true|yes|auto) set -- "$@" --skip-credential-checks ;;
+    esac
   fi
   # shellcheck disable=SC2086
   "$@"
