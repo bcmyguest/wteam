@@ -8,6 +8,21 @@ REPO=$(cd "$HARNESS/../../.." && pwd)
 export TB_HARNESS_AGENT=${TB_HARNESS_AGENT:-wteam_harbor_agent:HarnessAgent}
 export TB_HARNESS_DIR=${TB_HARNESS_DIR:-/tmp/wteam-harness-tb-$(date +%Y%m%d-%H%M%S)}
 export PYTHONPATH="${HARNESS}${PYTHONPATH:+:$PYTHONPATH}"
+# Per-task agent wall clock. 15m was too tight for local ThinkingCoder on hard
+# TB items (timed out mid-work → exception_stats). 30m still advances the suite.
+export TB_AGENT_TIMEOUT_SEC=${TB_AGENT_TIMEOUT_SEC:-1800}
+export TB_DISK_MIN_AVAIL_GB=${TB_DISK_MIN_AVAIL_GB:-15}
+export TB_DISK_WARN_AVAIL_GB=${TB_DISK_WARN_AVAIL_GB:-40}
+
+harness_disk_preflight() {
+  mkdir -p "$TB_HARNESS_DIR"
+  if ! sh "$HARNESS/host_cleanup.sh"; then
+    echo "harness-tb: disk below TB_DISK_MIN_AVAIL_GB=${TB_DISK_MIN_AVAIL_GB}G after cleanup — refusing to start" >&2
+    exit 2
+  fi
+  avail=$(df -Pk / 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024/1024}')
+  echo "harness-tb disk preflight: ${avail:-?}G free on / (min ${TB_DISK_MIN_AVAIL_GB}G)" >&2
+}
 
 require_harness_binaries() {
   require_harbor
@@ -69,6 +84,22 @@ require_harness_binaries() {
       # Strip provider prefix for lemonade model id inside opencode.json.
       MODEL_ID=${MODEL_NAME#lemonade/}
       MODEL_ID=${MODEL_ID#openai/}
+      # Explicit limits: OpenCode defaults can let thinking models burn a full
+      # output budget (reason=length) with no tool calls; continuous.sh resumes.
+      # Cap output so length→continue fires before a single useless dump.
+      OC_CTX=${TB_OPENCODE_CONTEXT:-131072}
+      OC_OUT=${TB_OPENCODE_OUTPUT:-16384}
+      # ThinkingCoder (and other Qwen3 thinking recipes) burn the completion
+      # budget on reasoning_content unless lemonade gets enable_thinking=false.
+      # Bench defaults off; set TB_OPENCODE_ENABLE_THINKING=1 to keep reasoning.
+      case ${TB_OPENCODE_ENABLE_THINKING:-0} in
+        1|true|yes|on)
+          EXTRA_BODY='"extraBody": {}'
+          ;;
+        *)
+          EXTRA_BODY='"extraBody": {"enable_thinking": false, "chat_template_kwargs": {"enable_thinking": false}}'
+          ;;
+      esac
       OPENCODE_CFG_DIR=${TB_HARNESS_DIR:-/tmp/wteam-harness-tb}/opencode-config
       mkdir -p "$OPENCODE_CFG_DIR"
       OPENCODE_CFG=$OPENCODE_CFG_DIR/opencode.json
@@ -80,11 +111,15 @@ require_harness_binaries() {
       "npm": "@ai-sdk/openai-compatible",
       "name": "Lemonade",
       "models": {
-        "$MODEL_ID": { "tool_call": true }
+        "$MODEL_ID": {
+          "tool_call": true,
+          "limit": { "context": $OC_CTX, "output": $OC_OUT }
+        }
       },
       "options": {
         "baseURL": "$LEMONADE_BASE_URL",
-        "apiKey": "{env:OPENAI_API_KEY}"
+        "apiKey": "{env:OPENAI_API_KEY}",
+        $EXTRA_BODY
       }
     }
   }
@@ -105,6 +140,16 @@ YAML
   export HARNESS_CLI AUTH
 }
 
+# Resolve Harbor-cached verifier suites for the included task (agent images often omit them).
+resolve_tb_verify_tests() {
+  task=${TB_INCLUDE_TASK:-}
+  task=${task#terminal-bench/}
+  [ -n "$task" ] || return 1
+  cache=${HARBOR_CACHE_DIR:-$HOME/.cache/harbor/tasks/packages/terminal-bench}
+  # Newest cached digest wins.
+  ls -1d "$cache/$task"/*/tests 2>/dev/null | tail -1
+}
+
 harness_mounts_json() {
   case $HARNESS_CLI in
     codex)
@@ -123,7 +168,13 @@ harness_mounts_json() {
   esac
   printf '{"type":"bind","source":"%s","target":"/usr/local/bin/wteam","read_only":true},' "$WTEAM"
   printf '{"type":"bind","source":"%s","target":"/opt/wteam-harness/in_container_continuous.sh","read_only":true},' "$HARNESS/in_container_continuous.sh"
-  printf '{"type":"bind","source":"%s","target":"/opt/wteam-harness/in_container_team.sh","read_only":true}]' "$HARNESS/in_container_team.sh"
+  printf '{"type":"bind","source":"%s","target":"/opt/wteam-harness/in_container_team.sh","read_only":true}' "$HARNESS/in_container_team.sh"
+  # Optional: verifier test suites so continuous verify≈Harbor reward (not vacuous npm test).
+  verify_tests=$(resolve_tb_verify_tests || true)
+  if [ -n "${verify_tests:-}" ] && [ -d "$verify_tests" ]; then
+    printf ',{"type":"bind","source":"%s","target":"/opt/wteam-harness/tb-verify-tests","read_only":true}' "$verify_tests"
+  fi
+  printf ']'
 }
 
 # Usage: harness_harbor_run <continuous|fresh|team> -l N [extra harbor args...]
@@ -157,14 +208,29 @@ harness_harbor_run() {
     set -- "$@" \
       --extra-docker-compose "$HOST_GATEWAY_COMPOSE" \
       --ae "OPENAI_API_KEY=${OPENAI_API_KEY:-lemonade}" \
-      --ak "lemonade_base_url=$LEMONADE_BASE_URL"
+      --ak "lemonade_base_url=$LEMONADE_BASE_URL" \
+      --ak "opencode_continues=${TB_OPENCODE_CONTINUES:-3}" \
+      --ak "opencode_fresh_retries=${TB_OPENCODE_FRESH_RETRIES:-1}" \
+      --ak "opencode_verify_retries=${TB_OPENCODE_VERIFY_RETRIES:-8}" \
+      --ak "opencode_variant=${TB_OPENCODE_VARIANT:-}" \
+      --ak "agent_timeout_sec=${TB_AGENT_TIMEOUT_SEC}"
   fi
+  # Also pass timeout for non-opencode CLIs.
+  case $HARNESS_CLI in
+    opencode) ;;
+    *) set -- "$@" --ak "agent_timeout_sec=${TB_AGENT_TIMEOUT_SEC}" ;;
+  esac
   if [ -z "${CURSOR_API_KEY:-}" ]; then
     case ${TB_SKIP_CREDENTIAL_CHECKS:-auto} in
       1|true|yes|auto) set -- "$@" --skip-credential-checks ;;
     esac
   fi
-  echo "harness-tb mode=$mode cli=$HARNESS_CLI job=$job_name dir=$TB_HARNESS_DIR" >&2
+  harness_disk_preflight
+  echo "harness-tb mode=$mode cli=$HARNESS_CLI job=$job_name dir=$TB_HARNESS_DIR timeout=${TB_AGENT_TIMEOUT_SEC}s" >&2
   # shellcheck disable=SC2086
   "$@"
+  ec=$?
+  # End-of-job cleanup (between-task cleanup also runs from the agent).
+  sh "$HARNESS/host_cleanup.sh" || true
+  return "$ec"
 }

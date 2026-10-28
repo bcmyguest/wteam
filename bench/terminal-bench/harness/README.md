@@ -56,6 +56,19 @@ Harbor runs each task’s **Docker environment** and **verifier**. The agent pha
 
 The task's hidden verifier runs after the agent exits. The custom agent raises an error when setup or the agent command exits nonzero, or when the agent exit marker is missing. Inspect `agent/exit_code.txt` and the per-trial logs before reporting a score. The team arm also saves its wteam logs and state under the trial's `agent/` directory.
 
+**OpenCode + local models (ThinkingCoder):** reward is the Harbor verifier, not “agent wrote a file.” Infra alone is not a pass.
+
+1. Lemonade load without `preserve_thinking` (ThinkingCoder’s saved recipe forces a `<think>` generation prompt). `run_opencode_lemonade.sh` unload+loads with `enable_thinking/preserve_thinking: false` by default.
+2. OpenCode `options.extraBody` with `enable_thinking: false` (`TB_OPENCODE_ENABLE_THINKING=0` default).
+3. Continuous arm: `--continue` on `length`, fresh session if stuck, then a **verify→fix** loop (`TB_OPENCODE_VERIFY_RETRIES`, default 8) that re-prompts with `check_routing.py` / `npm test` / `lake build` failures until green (or exhausts).
+
+Default model id: `Qwen3.6-35B-A3B-ThinkingCoder`. Pin a task with `TB_INCLUDE_TASK=terminal-bench/<name>` — `-l 1` often hits hard photonic first.
+
+```bash
+TB_MODE=harness TB_INCLUDE_TASK=terminal-bench/react-lead-form \
+  sh bench/terminal-bench/run_opencode_lemonade.sh 1 Qwen3.6-35B-A3B-ThinkingCoder
+```
+
 ## vs `external-tb-*`
 
 | | harness-tb | external-tb-cursor |

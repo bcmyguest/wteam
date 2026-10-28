@@ -9,12 +9,16 @@ index.js and exits in ~100ms inside Docker (all-zero TB scores).
 
 from __future__ import annotations
 
+import asyncio
 import shlex
+import subprocess
 from pathlib import Path
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
+
+_HOST_CLEANUP = Path(__file__).resolve().parent / "host_cleanup.sh"
 
 
 class HarnessAgent(BaseAgent):
@@ -34,10 +38,45 @@ class HarnessAgent(BaseAgent):
         self.pairs = str(kwargs.get("pairs") or "4")
         self.review = str(kwargs.get("review") or "autopass")
         self.lemonade_base_url = str(kwargs.get("lemonade_base_url") or "")
+        self.opencode_continues = str(kwargs.get("opencode_continues") or "")
+        self.opencode_fresh_retries = str(kwargs.get("opencode_fresh_retries") or "")
+        self.opencode_verify_retries = str(kwargs.get("opencode_verify_retries") or "")
+        self.opencode_variant = str(kwargs.get("opencode_variant") or "")
+        # Cap wall time per task so a hard TB item cannot burn the whole sweep.
+        # Harbor task.toml often sets agent timeout_sec=28800; we still enforce this.
+        raw_timeout = kwargs.get("agent_timeout_sec") or kwargs.get("timeout_sec")
+        try:
+            self.agent_timeout_sec = int(raw_timeout) if raw_timeout else 1800
+        except (TypeError, ValueError):
+            self.agent_timeout_sec = 1800
 
     def version(self) -> str:
-        return "0.4.0"
+        return "0.5.4"
 
+    @staticmethod
+    def _host_cleanup(*, critical_ok: bool = True) -> int:
+        """Reclaim Docker/tmp leftovers between trials. Returns cleanup exit code."""
+        if not _HOST_CLEANUP.is_file():
+            return 0
+        try:
+            proc = subprocess.run(
+                ["sh", str(_HOST_CLEANUP)],
+                check=False,
+                timeout=180,
+                capture_output=True,
+                text=True,
+            )
+            # cleanup already appends to $TB_HARNESS_DIR/disk-monitor.log when set
+            if proc.returncode == 2 and not critical_ok:
+                raise RuntimeError(
+                    "disk below TB_DISK_MIN_AVAIL_GB after between-task cleanup; "
+                    "refusing further trials"
+                )
+            return int(proc.returncode or 0)
+        except subprocess.TimeoutExpired:
+            return 1
+        except OSError:
+            return 1
     async def setup(self, environment: BaseEnvironment) -> None:
         setup_result = await environment.exec(
             command=(
@@ -86,7 +125,12 @@ class HarnessAgent(BaseAgent):
         (self.logs_dir / self.MARKER).write_text(
             f"mode={self.mode}\ncli={self.cli}\nmodel={self.model}\n"
             f"pairs={self.pairs}\nreview={self.review}\n"
-            f"lemonade_base_url={self.lemonade_base_url}\n",
+            f"lemonade_base_url={self.lemonade_base_url}\n"
+            f"opencode_continues={self.opencode_continues}\n"
+            f"opencode_fresh_retries={self.opencode_fresh_retries}\n"
+            f"opencode_verify_retries={self.opencode_verify_retries}\n"
+            f"opencode_variant={self.opencode_variant}\n"
+            f"agent_timeout_sec={self.agent_timeout_sec}\n",
             encoding="utf-8",
         )
         script = (
@@ -107,6 +151,14 @@ class HarnessAgent(BaseAgent):
         }
         if self.lemonade_base_url:
             env["LEMONADE_BASE_URL"] = self.lemonade_base_url
+        if self.opencode_continues:
+            env["TB_OPENCODE_CONTINUES"] = self.opencode_continues
+        if self.opencode_fresh_retries:
+            env["TB_OPENCODE_FRESH_RETRIES"] = self.opencode_fresh_retries
+        if self.opencode_verify_retries:
+            env["TB_OPENCODE_VERIFY_RETRIES"] = self.opencode_verify_retries
+        if self.opencode_variant:
+            env["TB_OPENCODE_VARIANT"] = self.opencode_variant
         # Capture stdout/stderr so empty agent/ dirs are diagnosable.
         cmd = (
             f"export PATH=/usr/local/bin:/opt/cursor-agent:$PATH HOME=/root; "
@@ -120,14 +172,34 @@ class HarnessAgent(BaseAgent):
             f"cp /app/.wteam/tb/state.json /logs/agent/wteam-state.json; fi; "
             f"echo exit=$ec > /logs/agent/exit_code.txt; exit $ec"
         )
-        result = await environment.exec(command=cmd, env=env, timeout_sec=28800)
-        if result.return_code != 0:
-            raise RuntimeError(
-                f"Agent command exited with code {result.return_code}; "
-                "see agent/stdout.log and agent/stderr.log"
-            )
         exit_marker = self.logs_dir / "exit_code.txt"
-        if not exit_marker.is_file():
-            raise RuntimeError("Agent command finished without agent/exit_code.txt")
-        if exit_marker.read_text(encoding="utf-8").strip() != "exit=0":
-            raise RuntimeError("Agent command reported failure in agent/exit_code.txt")
+        try:
+            # Harbor's DockerEnvironment.exec raises RuntimeError("Command timed out
+            # after N seconds") on timeout — that becomes exception_stats and skips
+            # a clean reward=0 grade. Catch and treat as a normal agent failure.
+            result = await environment.exec(
+                command=cmd, env=env, timeout_sec=self.agent_timeout_sec
+            )
+            if not exit_marker.is_file():
+                code = result.return_code if result.return_code is not None else 1
+                exit_marker.write_text(f"exit={code}\n", encoding="utf-8")
+        except (TimeoutError, asyncio.TimeoutError, RuntimeError) as exc:
+            # DockerEnvironment turns asyncio.TimeoutError into
+            # RuntimeError("Command timed out after N seconds").
+            timed_out = isinstance(exc, (TimeoutError, asyncio.TimeoutError)) or (
+                "timed out" in str(exc).lower()
+            )
+            if not timed_out:
+                raise
+            if not exit_marker.is_file():
+                exit_marker.write_text("exit=124\n", encoding="utf-8")
+            (self.logs_dir / "harness_agent_note.txt").write_text(
+                f"agent_timeout code=124\n{type(exc).__name__}: {exc}\n",
+                encoding="utf-8",
+            )
+            # Do not re-raise: Harbor can still run the verifier → reward 0
+            # instead of counting the trial under exception_stats.
+        finally:
+            # Exit 2 from cleanup = disk critically low — abort so we do not
+            # keep pulling multi-GB TB images onto a full root FS.
+            self._host_cleanup(critical_ok=False)
