@@ -13,6 +13,17 @@ use crate::team::{DEFAULT_CHECK_TIMEOUT_SECS, NodeKind, Team, TeamEvent, parse_i
 use crate::work::{self, Ticket};
 use crate::worktree;
 
+/// Cap on diff text embedded in a review request.
+const MAX_DIFF_BYTES: usize = 100_000;
+/// Lines of a failed check's output returned to the worker.
+const CHECK_TAIL_LINES: usize = 40;
+/// How long a busy agent may lack a pid before its spawn counts as dead (30 s).
+const SPAWN_GRACE_NANOS: u64 = 30_000_000_000;
+/// Consecutive failed dispatches after which a ticket blocks instead of staying ready.
+pub const DISPATCH_ATTEMPTS: u32 = 3;
+/// Time limit for the project worktree hook (`.wteam/hooks/worktree`).
+const HOOK_TIMEOUT_SECS: u64 = 120;
+
 /// Everything a command needs to act on one effort.
 #[derive(Debug, Clone)]
 pub struct Ctx {
@@ -34,15 +45,26 @@ impl Ctx {
     }
 }
 
-/// Whether process `pid` exists (`kill -0`).
+/// Whether process `pid` exists (`kill -0` through the POSIX shell builtin).
 pub fn pid_alive(pid: u32) -> bool {
-    std::process::Command::new("kill")
-        .arg("-0")
+    std::process::Command::new("sh")
+        .args(["-c", "kill -0 \"$1\"", "sh"])
         .arg(pid.to_string())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+#[cfg(test)]
+mod pid_tests {
+    use super::pid_alive;
+
+    #[test]
+    fn current_process_is_alive_and_impossible_pid_is_not() {
+        assert!(pid_alive(std::process::id()));
+        assert!(!pid_alive(u32::MAX));
+    }
 }
 
 /// Whether a `wteam run` is driving the orchestrator. A run flag whose watcher is dead is
@@ -120,19 +142,6 @@ pub fn heal(ctx: &Ctx) -> Result<()> {
     }
     Ok(())
 }
-
-/// Cap on diff text embedded in a review request.
-const MAX_DIFF_BYTES: usize = 100_000;
-
-/// Lines of a failed check's output returned to the worker.
-const CHECK_TAIL_LINES: usize = 40;
-
-/// How long a busy agent may lack a pid before its spawn counts as dead (30 s).
-const SPAWN_GRACE_NANOS: u64 = 30_000_000_000;
-/// Consecutive failed dispatches after which a ticket blocks instead of staying ready.
-pub const DISPATCH_ATTEMPTS: u32 = 3;
-/// Time limit for the project worktree hook (`.wteam/hooks/worktree`).
-const HOOK_TIMEOUT_SECS: u64 = 120;
 
 /// Normalise `1`/`#01` to the two-digit ticket id and load its definition.
 fn find_ticket(ctx: &Ctx, id: &str) -> Result<Ticket> {

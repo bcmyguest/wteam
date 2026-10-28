@@ -218,6 +218,8 @@ fn codex_resume_command() {
             "exec",
             "resume",
             "--json",
+            "-m",
+            "m1",
             "--perm",
             "x",
             "-c",

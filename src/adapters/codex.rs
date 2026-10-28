@@ -19,6 +19,9 @@ impl Adapter for Codex {
         let mut args: Vec<String> = vec!["exec".into()];
         if let Some(id) = &req.session_id {
             args.extend(["resume".into(), "--json".into()]);
+            if let Some(model) = &req.model {
+                args.extend(["-m".into(), model.clone()]);
+            }
             args.extend(req.permissions.args.iter().cloned());
             args.extend(wteam_dir_args(req));
             args.extend(req.extra_args.iter().cloned());
@@ -132,5 +135,23 @@ fn find_rollouts(dir: &Path, suffix: &str, newest: &mut Option<(String, PathBuf)
         if newest.as_ref().is_none_or(|(n, _)| name > *n) {
             *newest = Some((name, path));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resume_keeps_requested_model() {
+        let req = TurnRequest {
+            prompt: "continue".into(),
+            session_id: Some("session-id".into()),
+            model: Some("gpt-6-luna".into()),
+            ..TurnRequest::default()
+        };
+        let spec = Codex.command(&req);
+        assert!(spec.args.windows(2).any(|w| w == ["-m", "gpt-6-luna"]));
+        assert_eq!(spec.args.last().map(String::as_str), Some("continue"));
     }
 }

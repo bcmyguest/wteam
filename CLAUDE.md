@@ -48,6 +48,12 @@ output (or is on its allowlist of other tools' flags). Add new README flags only
 exist in the CLI. Flags of other tools in README (for example `claude --setting-sources`)
 fail the test; describe them in prose or add them to `OTHER_TOOLS`.
 
+The Terminal-Bench Harbor harness lives in `bench/terminal-bench/harness/`. Its team arm
+installs Git in task containers that lack it, runs a planner before `wteam run`, and saves
+worker logs under each Harbor trial's `agent/wteam-logs/`. Minimal task images may lack
+an external `kill` executable: process liveness must use the POSIX shell builtin.
+Codex resumed turns must pass their configured model again.
+
 Pre-commit enforces Conventional Commits (`feat:`, `fix:`, `docs:`, …) via a
 commit-msg hook; install with
 `pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg`.
