@@ -13,7 +13,10 @@ require_harness_binaries() {
   require_harbor
   require_docker
   if [ -z "${WTEAM:-}" ] || [ ! -x "$WTEAM" ]; then
-    if [ -x "$REPO/target/release/wteam" ]; then
+    if [ -x "$REPO/target/x86_64-unknown-linux-musl/release/wteam" ]; then
+      WTEAM=$REPO/target/x86_64-unknown-linux-musl/release/wteam
+      export WTEAM
+    elif [ -x "$REPO/target/release/wteam" ]; then
       WTEAM=$REPO/target/release/wteam
       export WTEAM
     else

@@ -102,7 +102,7 @@ wteam verdict "$id" pass
 EOF
     chmod +x .wteam-fake/reviewer.sh
     export WTEAM_FAKE_DIR=/app/.wteam-fake
-    printf 'name = "reviewer"\ncli = "fake"\nmodel = "fake"\nprompt = "autopass"\nprofile = "review"\n' \
+    printf 'name = "reviewer"\ncli = "fake"\nmodel = "fake"\nprompt = "reviewer"\nprofile = "review"\n' \
       >.wteam/agents/reviewer.toml
     ;;
   on) ;;
@@ -116,7 +116,7 @@ Terminal-Bench task:
 $INSTRUCTION
 
 Write .wteam/$SLUG/spec.md and 2-6 implementation tickets under .wteam/$SLUG/tickets/.
-Split work across independent files or components where the task allows it; one ticket is valid for an indivisible task. Put the task's complete acceptance criteria in the spec. Do not solve the task during planning. Run wteam pickup --slug $SLUG, fix every problem it reports, and finish when the ticket graph is valid."
+Split work across independent files or components where the task allows it; one ticket is valid for an indivisible task. List only files to change in each ticket's Files field. Put the task's complete acceptance criteria in the spec and ticket checkboxes. Set every ticket's Verify field to the single shell command true: Harbor runs the real hidden verifier after the agent exits. Do not solve the task during planning. Run wteam pickup --slug $SLUG, fix every problem it reports, and finish when the ticket graph is valid."
 case $CLI in
   codex)
     codex exec --json --dangerously-bypass-approvals-and-sandbox \
@@ -136,6 +136,10 @@ case $CLI in
 esac
 ticket_count=$(find ".wteam/$SLUG/tickets" -name '*.md' -type f | wc -l)
 [ "$ticket_count" -gt 0 ] || { echo "planner wrote no tickets" >&2; exit 1; }
+# Harbor grades the artifact after the agent exits; avoid model-written prose as a shell check.
+for ticket in ".wteam/$SLUG"/tickets/*.md; do
+  sed -i 's/^\*\*Verify:\*\*.*/**Verify:** true/' "$ticket"
+done
 wteam --root /app --slug "$SLUG" pickup >/logs/agent/pickup.txt
 exec wteam --root /app --slug "$SLUG" run --pairs "$PAIRS" \
   --isolation none --dispatch auto --timeout "${WTEAM_RUN_TIMEOUT:-28800}" \

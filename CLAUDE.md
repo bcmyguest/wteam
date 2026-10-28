@@ -53,6 +53,9 @@ installs Git in task containers that lack it, runs a planner before `wteam run`,
 worker logs under each Harbor trial's `agent/wteam-logs/`. Minimal task images may lack
 an external `kill` executable: process liveness must use the POSIX shell builtin.
 Codex resumed turns must pass their configured model again.
+Build `wteam` for `x86_64-unknown-linux-musl` for Harbor task images with older glibc.
+Most sampled tasks use `/app`; `takens-embedding-lean` uses `/task`, so the harness
+creates an `/app` alias when `/task` exists and `/app` does not.
 
 Pre-commit enforces Conventional Commits (`feat:`, `fix:`, `docs:`, …) via a
 commit-msg hook; install with

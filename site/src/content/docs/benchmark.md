@@ -144,6 +144,10 @@ Full detail: [`bench/runner/README.md`](https://github.com/bcmyguest/wteam/blob/
 [`bench/BENCH_OPTIONS.md`](https://github.com/bcmyguest/wteam/blob/main/bench/BENCH_OPTIONS.md) notes
 which external suites are saturated vs still useful; [`bench/terminal-bench/`](https://github.com/bcmyguest/wteam/tree/main/bench/terminal-bench) targets Harbor Terminal-Bench 4.0.
 
+### Terminal-Bench 4.0 status
+
+A [ten-task Codex Luna team attempt](https://github.com/bcmyguest/wteam/blob/main/bench/results/2026-10-28-terminal-bench.md) returned a raw Harbor reward of 0/10. Codex usage limits and harness failures interrupted most trials; the matching single-agent arm has not run. We do not report a single-versus-team score from this attempt.
+
 ## Architectural benefits (not scored by these suites)
 
 These are product properties the benchmarks do not price:

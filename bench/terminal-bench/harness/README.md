@@ -14,7 +14,7 @@ Driver CLI defaults to Cursor `agent` (`BENCH_CLI=cursor`); set `BENCH_CLI=codex
 
 ## Prerequisites
 
-- `harbor`, Docker, release **`wteam`** on the host (`cargo build --release`)
+- `harbor`, Docker, a static musl **`wteam`** on the host (`rustup target add x86_64-unknown-linux-musl && cargo build --release --target x86_64-unknown-linux-musl`). Task images can have older glibc than the host; the harness prefers this binary when present.
 - Host Cursor **agent install dir** (not just the `~/.local/bin/agent` symlink) — we mount the
   resolved `…/versions/<ver>/` tree so `node` + `index.js` exist in the container. Mounting
   only the wrapper causes ~100ms “agent” exits and all-zero rewards.
@@ -27,12 +27,12 @@ Driver CLI defaults to Cursor `agent` (`BENCH_CLI=cursor`); set `BENCH_CLI=codex
 # One task, team arm (smoke)
 sh bench/terminal-bench/harness/run_team.sh 1
 
-# Full 66-task Codex Luna comparison, one attempt per task
+# Matched 10-task Codex Luna comparison, one attempt per task
 export BENCH_CLI=codex BENCH_MODEL=gpt-6-luna TB_MODEL=gpt-6-luna
-export TB_DATASET=terminal-bench/terminal-bench@4 TB_N_CONCURRENT=4
+export TB_DATASET=terminal-bench/terminal-bench@4 TB_N_CONCURRENT=2
 export TB_PAIRS=4 BENCH_REVIEW=autopass
-TB_HARNESS_DIR=/tmp/wteam-tb-luna-single sh bench/terminal-bench/harness/run_continuous.sh 66
-TB_HARNESS_DIR=/tmp/wteam-tb-luna-team sh bench/terminal-bench/harness/run_team.sh 66
+TB_HARNESS_DIR=/tmp/wteam-tb-luna-single sh bench/terminal-bench/harness/run_continuous.sh 10
+TB_HARNESS_DIR=/tmp/wteam-tb-luna-team sh bench/terminal-bench/harness/run_team.sh 10
 
 # OpenCode + local Lemonade (wteam harness continuous)
 TB_MODE=harness sh bench/terminal-bench/run_opencode_lemonade.sh 1 Nemotron-3.5-Bolt-E4B-GGUF

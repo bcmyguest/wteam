@@ -40,7 +40,10 @@ class HarnessAgent(BaseAgent):
 
     async def setup(self, environment: BaseEnvironment) -> None:
         await environment.exec(
-            command="mkdir -p /opt/wteam-harness /logs/agent /usr/local/bin"
+            command=(
+                "if [ ! -e /app ] && [ -d /task ]; then ln -s /task /app; fi; "
+                "mkdir -p /opt/wteam-harness /logs/agent /usr/local/bin"
+            )
         )
         if self.cli == "codex":
             command = (
