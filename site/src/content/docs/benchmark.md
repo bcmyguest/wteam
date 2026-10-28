@@ -146,7 +146,7 @@ which external suites are saturated vs still useful; [`bench/terminal-bench/`](h
 
 ### Terminal-Bench 4.0 status
 
-A [ten-task Codex Luna team attempt and interrupted single-agent arm](https://github.com/bcmyguest/wteam/blob/main/bench/results/2026-10-28-terminal-bench.md) produced no comparable score. The team job returned a raw Harbor reward of 0/10 amid usage limits and harness failures. The single-agent job completed five trials before interruption; only three had successful agent exits. We do not report a single-versus-team score from these attempts.
+A [ten-task Codex Luna team attempt and interrupted single-agent arm](https://github.com/bcmyguest/wteam/blob/main/bench/results/2026-10-28-terminal-bench.md) produced no comparable score. The team job returned a raw Harbor reward of 0/10 amid usage limits and harness failures. The single-agent job completed five trials before interruption; only three had successful agent exits. The harness also recorded failed Codex commands as ordinary zero-reward trials; it now checks agent exits, pending a fresh Harbor verification. We do not report a single-versus-team score from these attempts.
 
 ## Architectural benefits (not scored by these suites)
 

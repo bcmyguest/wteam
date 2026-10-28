@@ -56,6 +56,9 @@ Codex resumed turns must pass their configured model again.
 Build `wteam` for `x86_64-unknown-linux-musl` for Harbor task images with older glibc.
 Most sampled tasks use `/app`; `takens-embedding-lean` uses `/task`, so the harness
 creates an `/app` alias when `/task` exists and `/app` does not.
+Harbor's `ExecResult.return_code` must be checked by the custom agent; otherwise a
+failed Codex command is recorded as a normal zero-reward trial. Require the
+container's `agent/exit_code.txt` marker before accepting a completed run.
 
 Pre-commit enforces Conventional Commits (`feat:`, `fix:`, `docs:`, …) via a
 commit-msg hook; install with

@@ -54,7 +54,7 @@ Harbor runs each task’s **Docker environment** and **verifier**. The agent pha
 - **continuous** → [`in_container_continuous.sh`](in_container_continuous.sh) (one CLI episode with the TB instruction).
 - **team** → [`in_container_team.sh`](in_container_team.sh) (one planning episode, ticket validation, and an orchestrated `wteam run` with four pairs by default). The task container installs Git if needed. The team run budget defaults to the Harbor task budget of 28,800 seconds; reviews autopass by default.
 
-The task's hidden verifier runs after the agent exits. A Harbor reward of zero can mean a valid failed attempt or an agent/tool failure; inspect `agent/exit_code.txt` and the per-trial logs before reporting a score. The team arm also saves its wteam logs and state under the trial's `agent/` directory.
+The task's hidden verifier runs after the agent exits. The custom agent raises an error when setup or the agent command exits nonzero, or when the agent exit marker is missing. Inspect `agent/exit_code.txt` and the per-trial logs before reporting a score. The team arm also saves its wteam logs and state under the trial's `agent/` directory.
 
 ## vs `external-tb-*`
 

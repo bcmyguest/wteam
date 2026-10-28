@@ -39,12 +39,14 @@ class HarnessAgent(BaseAgent):
         return "0.4.0"
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        await environment.exec(
+        setup_result = await environment.exec(
             command=(
                 "if [ ! -e /app ] && [ -d /task ]; then ln -s /task /app; fi; "
                 "mkdir -p /opt/wteam-harness /logs/agent /usr/local/bin"
             )
         )
+        if setup_result.return_code != 0:
+            raise RuntimeError(f"Agent setup exited with code {setup_result.return_code}")
         if self.cli == "codex":
             command = (
                 "mkdir -p /root/.codex && "
@@ -71,7 +73,9 @@ class HarnessAgent(BaseAgent):
             )
         else:
             raise ValueError(f"Unsupported harness CLI: {self.cli}")
-        await environment.exec(command=command)
+        setup_result = await environment.exec(command=command)
+        if setup_result.return_code != 0:
+            raise RuntimeError(f"Agent setup exited with code {setup_result.return_code}")
 
     async def run(
         self,
@@ -116,4 +120,14 @@ class HarnessAgent(BaseAgent):
             f"cp /app/.wteam/tb/state.json /logs/agent/wteam-state.json; fi; "
             f"echo exit=$ec > /logs/agent/exit_code.txt; exit $ec"
         )
-        await environment.exec(command=cmd, env=env, timeout_sec=28800)
+        result = await environment.exec(command=cmd, env=env, timeout_sec=28800)
+        if result.return_code != 0:
+            raise RuntimeError(
+                f"Agent command exited with code {result.return_code}; "
+                "see agent/stdout.log and agent/stderr.log"
+            )
+        exit_marker = self.logs_dir / "exit_code.txt"
+        if not exit_marker.is_file():
+            raise RuntimeError("Agent command finished without agent/exit_code.txt")
+        if exit_marker.read_text(encoding="utf-8").strip() != "exit=0":
+            raise RuntimeError("Agent command reported failure in agent/exit_code.txt")

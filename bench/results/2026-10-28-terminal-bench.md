@@ -35,3 +35,7 @@ The matching Codex Luna single-agent job started with the same ten-task selectio
 | `takens-embedding-lean`, `satb-audio-transcription`, `formal-crypto` | — | — | Not started. |
 
 The single-agent record is under `/tmp/wteam-tb-luna-single10-20261028/jobs/` on the benchmark host. The three completed agent episodes with exit code 0 each earned reward 0; this is a partial observation, not a ten-task benchmark score.
+
+## Scoring fault found after the attempts
+
+The custom Harbor agent ignored `environment.exec()` return codes. For example, the single-arm `react-lead-form` trial has `agent/exit_code.txt` set to `exit=1` and a Codex `turn.failed` event with `workspace routing discovery failed`, yet Harbor recorded reward 0 with `exception_info: null`. The harness now raises on nonzero setup or agent exits and on a missing agent exit marker. A local fake-environment check confirmed these branches; a fresh Harbor run has not yet verified the change. The prior raw rewards remain invalid for comparison.
