@@ -1,6 +1,6 @@
 // worker -> tests -> reviewer -> security reviewer; both reviewers must pass.
 digraph security {
-  graph [max_visits=3, handoff_tokens=150000]
+  graph [description="Worker, then cargo test, then a reviewer and a security reviewer; both must pass. Use for Rust changes that handle input, secrets, auth or file paths.", max_visits=3, handoff_tokens=150000]
   planner      [agent="planner"]
   orchestrator [agent="orchestrator"]
   worker       [agent="worker", count="$pairs"]

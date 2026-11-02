@@ -42,7 +42,7 @@ pub enum Command {
     Init,
     /// Import planning material and verify it before a run.
     Pickup(PickupArgs),
-    /// Run a Goldfish phase (persona chain; presets: plan-review, validate).
+    /// Run a Goldfish phase (persona chain from `phases/<name>.toml`; built-ins: plan-review, validate).
     Phase(PhaseArgs),
     /// Record a Goldfish phase verdict (requires WTEAM_AGENT / WTEAM_PHASE).
     PhaseVerdict(PhaseVerdictArgs),
@@ -89,6 +89,10 @@ pub enum Command {
     Role(RoleArgs),
     /// Render the team or work graph as Mermaid.
     Graph(GraphArgs),
+    /// Teams a run can use (project, saved, built-in), with what each is for.
+    Teams,
+    /// Phases `wteam phase` can run (project, config dir, built-in), with what each is for.
+    Phases,
     /// Show how permission profiles translate per CLI (✔ exact, ≈ lossy, ✘ unsupported).
     Permissions(PermissionsArgs),
     /// Saved teams under ~/.config/wteam.
@@ -110,7 +114,8 @@ pub struct PickupArgs {
 
 #[derive(Debug, Args)]
 pub struct PhaseArgs {
-    /// Phase name: built-in presets `plan-review` and `validate`, or any name with `--persona`.
+    /// Phase name: a `phases/<name>.toml` in `.wteam/` or the config dir, a built-in
+    /// (`plan-review`, `validate`), or any name with `--persona`.
     pub name: String,
     /// Goldfish agent def / role names, in order (default: preset chain for known names).
     #[arg(long = "persona")]
@@ -118,6 +123,10 @@ pub struct PhaseArgs {
     /// Optional ticket id (validate zoom-local hint).
     #[arg(long)]
     pub ticket: Option<String>,
+    /// File the phase works on, relative to the repo root; repeatable. Listed in every
+    /// persona prompt; phases with `requires_input = true` need at least one.
+    #[arg(long = "input")]
+    pub inputs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Args)]

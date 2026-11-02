@@ -16,21 +16,8 @@ use crate::phase::{self, VerdictKind};
 
 pub fn phase(g: &Global, a: &PhaseArgs) -> Result<Out> {
     let ctx = Ctx::load(super::effort(g)?)?;
-    let owned: Vec<String> = a.persona.clone();
-    let preset = phase::preset_personas(&a.name);
-    let personas: Vec<&str> = if owned.is_empty() {
-        preset
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "unknown phase `{}` (no built-in personas); pass --persona",
-                    a.name
-                )
-            })?
-            .to_vec()
-    } else {
-        owned.iter().map(String::as_str).collect()
-    };
-    let report = phase::run(&ctx, &a.name, &personas, a.ticket.as_deref())?;
+    let def = phase::resolve(&ctx, &a.name, &a.persona)?;
+    let report = phase::run(&ctx, &a.name, &def, a.ticket.as_deref(), &a.inputs)?;
     let (text, value) = phase::report_out(&report);
     if !report.passed {
         bail!("{text}");
@@ -65,6 +52,7 @@ pub fn plan_review(g: &Global, a: &PlanReviewArgs) -> Result<Out> {
             name: "plan-review".into(),
             persona: a.persona.clone(),
             ticket: None,
+            inputs: Vec::new(),
         },
     )
 }

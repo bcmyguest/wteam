@@ -89,6 +89,16 @@ path that reaches a reviewer who already passed the round blocks the ticket.
 The work graph holds tickets and their `Blocked by` links. `wteam ready` lists
 the tickets with every blocker `Done`. `wteam graph --work` draws it.
 
+### Skills per ticket
+
+A ticket may name skills: `**Skill:** diagnose-failure` for its worker and
+`**Review skill:** audit-agent-diff` for every reviewer. A node's `skill=` names one
+for every ticket that role handles. Each brief, review request and fix request then
+opens with "Use the `<skill>` skill for this turn", so an agent whose session is
+resumed still gets the instruction; the role prompt reaches only a session's first
+turn. `wteam pickup` flags a value that is not a skill name, but it cannot check that
+the skill is installed in the agent's harness.
+
 ## Ticket lifecycle
 
 1. `dispatch` sets a ready ticket to `Doing` and mails its brief to a worker.

@@ -79,6 +79,7 @@ pub fn pickup(paths: &Paths, from: Option<&Path>) -> Result<PickupReport> {
 
     let mut problems = work::validate(&tickets);
     problems.extend(missing_verify_programs(&tickets));
+    problems.extend(bad_skill_names(&tickets));
     problems.extend(dirty_tree(&paths.root, from));
 
     let spec = std::fs::read_to_string(paths.spec_file()).unwrap_or_default();
@@ -208,6 +209,27 @@ fn programs(cmd: &str) -> Vec<&str> {
         .filter_map(|seg| {
             seg.split_whitespace()
                 .find(|tok| !tok.contains('=') || tok.starts_with('='))
+        })
+        .collect()
+}
+
+/// One problem per `**Skill:**` or `**Review skill:**` value that is not a skill name.
+fn bad_skill_names(tickets: &[Ticket]) -> Vec<String> {
+    tickets
+        .iter()
+        .flat_map(|t| {
+            [("skill", &t.skill), ("review skill", &t.review_skill)]
+                .into_iter()
+                .filter_map(move |(label, v)| {
+                    v.as_deref()
+                        .filter(|s| !crate::work::is_skill_name(s))
+                        .map(|s| {
+                            format!(
+                                "ticket {}: {label} `{s}` is not a skill name (lowercase letters, digits, `-`, `_`, `:`)",
+                                t.id
+                            )
+                        })
+                })
         })
         .collect()
 }

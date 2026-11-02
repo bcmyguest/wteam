@@ -130,3 +130,103 @@ fn phase_persona_override() {
         .success()
         .stdout(predicates::str::contains("validate-out"));
 }
+
+fn doc_pass_script(phase: &str) -> String {
+    format!(
+        r#"echo "$WTEAM_PROMPT" | grep -q 'Review the inputs for demo.' || exit 1
+echo "$WTEAM_PROMPT" | grep -q 'docs/adr.md' || exit 1
+mkdir -p .wteam/demo/phases/{phase}
+printf 'FINDINGS:\n' > .wteam/demo/phases/{phase}/v.md
+wteam phase-verdict pass --file .wteam/demo/phases/{phase}/v.md
+"#
+    )
+}
+
+fn doc_review_phase(r: &Repo) {
+    r.write(
+        ".wteam/phases/doc-review.toml",
+        "personas = [\"doc-claims\", \"doc-scope\"]\nrequires_input = true\nbrief = \"Review the inputs for {slug}.\\n\"\n",
+    );
+    for role in ["doc-claims", "doc-scope"] {
+        r.write(&format!(".wteam/roles/{role}.md"), &format!("# {role}\n"));
+        agent_toml(r, role, "review");
+        r.agent_script(role, &doc_pass_script("doc-review"));
+    }
+}
+
+#[test]
+fn phase_file_defines_a_new_phase_without_engine_code() {
+    let r = Repo::new("demo");
+    seed(&r);
+    r.write("docs/adr.md", "# ADR\n\nUse SQLite.\n");
+    doc_review_phase(&r);
+    r.wteam().args(["pickup"]).assert().success();
+    r.wteam()
+        .args(["phase", "doc-review", "--input", "docs/adr.md"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("PASSED"));
+    assert!(
+        r.path()
+            .join(".wteam/demo/phases/doc-review/02-doc-scope.md")
+            .is_file()
+    );
+}
+
+#[test]
+fn phase_file_can_require_an_existing_input() {
+    let r = Repo::new("demo");
+    seed(&r);
+    doc_review_phase(&r);
+    r.wteam().args(["pickup"]).assert().success();
+    r.wteam()
+        .args(["phase", "doc-review"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("needs at least one --input"));
+    r.wteam()
+        .args(["phase", "doc-review", "--input", "docs/missing.md"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("is not a file"));
+}
+
+#[test]
+fn project_phase_file_overrides_a_built_in() {
+    let r = Repo::new("demo");
+    seed(&r);
+    r.write(
+        ".wteam/phases/validate.toml",
+        "personas = [\"validate-out\"]\n",
+    );
+    agent_toml(&r, "validate-out", "review");
+    r.agent_script("validate-out", validate_pass_script());
+    r.wteam().args(["pickup"]).assert().success();
+    r.wteam()
+        .args(["phase", "validate"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("validate-out"));
+    assert!(
+        r.path()
+            .join(".wteam/demo/phases/validate/01-validate-out.md")
+            .is_file()
+    );
+    assert!(
+        !r.path()
+            .join(".wteam/demo/phases/validate/02-validate-mid.md")
+            .is_file()
+    );
+}
+
+#[test]
+fn unknown_phase_without_personas_names_the_phase_file() {
+    let r = Repo::new("demo");
+    seed(&r);
+    r.wteam().args(["pickup"]).assert().success();
+    r.wteam()
+        .args(["phase", "nope"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("phases/nope.toml"));
+}

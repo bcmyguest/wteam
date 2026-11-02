@@ -92,6 +92,33 @@ fn builtin_role(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Like [`load`], for a phase persona: a name with no definition but a user role prompt
+/// (`roles/<name>.md` beside a search dir) gets the default Goldfish definition, the
+/// `claude` CLI with its default model and the `review` profile.
+pub fn load_persona(name: &str, search: &[PathBuf]) -> Result<AgentDef> {
+    match load(name, search) {
+        Ok(def) => Ok(def),
+        Err(_) if user_role_file(name, search).is_some() => Ok(AgentDef {
+            name: name.to_string(),
+            cli: "claude".into(),
+            model: None,
+            prompt: Some(name.to_string()),
+            profile: Some("review".into()),
+            extra_args: Vec::new(),
+            context_window: None,
+        }),
+        Err(e) => Err(e),
+    }
+}
+
+fn user_role_file(name: &str, search: &[PathBuf]) -> Option<PathBuf> {
+    search
+        .iter()
+        .filter_map(|dir| dir.parent())
+        .map(|parent| parent.join("roles").join(format!("{name}.md")))
+        .find(|file| file.is_file())
+}
+
 /// Role prompt text for `name`. `search` holds the agent dirs (`.wteam/agents`,
 /// `$WTEAM_CONFIG_DIR/agents`); each is checked as a sibling `roles/<name>.md`,
 /// then the built-ins. A `name` containing `/` or ending `.md` is a file path.
@@ -100,13 +127,9 @@ pub fn role_prompt(name: &str, search: &[PathBuf]) -> Result<String> {
         return std::fs::read_to_string(name)
             .with_context(|| format!("reading role prompt {name}"));
     }
-    for dir in search {
-        let Some(parent) = dir.parent() else { continue };
-        let file = parent.join("roles").join(format!("{name}.md"));
-        if file.is_file() {
-            return std::fs::read_to_string(&file)
-                .with_context(|| format!("reading {}", file.display()));
-        }
+    if let Some(file) = user_role_file(name, search) {
+        return std::fs::read_to_string(&file)
+            .with_context(|| format!("reading {}", file.display()));
     }
     match builtin_role(name) {
         Some(text) => Ok(text.to_string()),
@@ -157,6 +180,21 @@ mod tests {
         assert!(load("nope", &[]).is_err());
         assert!(role_prompt("worker", &[]).unwrap().contains("worker"));
         assert!(role_prompt("nope", &[]).is_err());
+    }
+
+    #[test]
+    fn persona_with_only_a_role_file_gets_the_default_definition() {
+        let dir = tempfile::tempdir().unwrap();
+        let agents_dir = dir.path().join("agents");
+        std::fs::create_dir_all(dir.path().join("roles")).unwrap();
+        std::fs::write(dir.path().join("roles/doc-critic.md"), "# doc-critic\n").unwrap();
+        let search = [agents_dir];
+        let def = load_persona("doc-critic", &search).unwrap();
+        assert_eq!(def.cli, "claude");
+        assert_eq!(def.profile.as_deref(), Some("review"));
+        assert_eq!(def.prompt.as_deref(), Some("doc-critic"));
+        assert!(load_persona("no-role", &search).is_err());
+        assert!(load("doc-critic", &search).is_err());
     }
 
     #[test]

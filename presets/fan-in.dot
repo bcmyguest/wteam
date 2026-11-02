@@ -1,6 +1,6 @@
 // N workers share one reviewer.
 digraph fan_in {
-  graph [max_visits=3, handoff_tokens=150000]
+  graph [description="Several workers share one reviewer. Use when tickets are small or review capacity is the limit.", max_visits=3, handoff_tokens=150000]
   planner      [agent="planner"]
   orchestrator [agent="orchestrator"]
   worker       [agent="worker", count="$pairs"]

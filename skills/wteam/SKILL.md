@@ -7,17 +7,19 @@ Drive `wteam` through these steps. Finish each step's completion criterion befor
 
 ## 1. Intake
 
-Send one plain-text message asking three things: the goal, the complexity (S, M or L), and the pair count. Wait for the reply; type the questions into the message, never into an interactive question tool.
+Run `wteam --json teams` and `wteam --json phases`. Each entry has a `description` saying what it is for. When the user's request already states the goal, pick the team whose description fits it best (`default` when none fits better) and any phase beyond `plan-review` and `validate` whose description fits a deliverable (for example a document review for an ADR or report). Entries with no description are candidates only when their name or members make the fit obvious.
+
+Send one plain-text message asking for the goal, the complexity (S, M or L), and the pair count, and stating the team and extra phases you picked with one line of reason each. Say the user can name another team or phase. Wait for the reply; type the questions into the message, never into an interactive question tool.
 
 Derive `<slug>` from the goal: kebab-case, at most 4 words. Pass `--slug <slug>` to every `wteam` command that follows.
 
-Done when the user has answered all three and you hold the slug.
+Done when the user has answered, the team and extra phases are settled, and you hold the slug.
 
 ## 2. Plan
 
 Planning already happened (tickets in `.scratch/<slug>`): run `wteam pickup --from .scratch/<slug> --slug <slug>`.
 
-Otherwise spawn the planner with the prompt from `wteam role planner` (stdout; `--json` returns it as `text`), plus the goal and the slug. Model: sonnet (or the harness's medium model) for S and M, opus (the big model) for L.
+Otherwise spawn the planner with the prompt from `wteam role planner` (stdout; `--json` returns it as `text`), plus the goal, the slug, the chosen team's name and description so tickets suit its reviewers, and the names of installed skills that fit the work so it can set `Skill:` / `Review skill:` per ticket. Model: sonnet (or the harness's medium model) for S and M, opus (the big model) for L.
 
 - Claude Code: spawn a subagent whose prompt is the role prompt.
 - Codex: `codex exec -m <model> "<role prompt>"`.
@@ -49,7 +51,7 @@ Done when the user says go.
 
 ## 5. Run
 
-Run `wteam run --pairs N --slug <slug>`. It runs long: use a background task where the harness offers one, else the foreground. The watcher in `wteam run` waits and feeds the orchestrator; never call `wteam wait` yourself. Add `--budget-tokens <n>` when the user sets a token cap. `--dispatch auto` (the default) has the watcher dispatch ready tickets itself and wakes the orchestrator only for blocked tickets and human gates. `--dispatch model` has the orchestrator dispatch every ticket, as before.
+Run `wteam run --pairs N --team <team> --slug <slug>`. It runs long: use a background task where the harness offers one, else the foreground. The watcher in `wteam run` waits and feeds the orchestrator; never call `wteam wait` yourself. Add `--budget-tokens <n>` when the user sets a token cap. `--dispatch auto` (the default) has the watcher dispatch ready tickets itself and wakes the orchestrator only for blocked tickets and human gates. `--dispatch model` has the orchestrator dispatch every ticket, as before.
 
 The orchestrator (Elephant) may call `wteam phase validate` while the run is live. That is judgment, not a watcher hook.
 
@@ -60,6 +62,8 @@ Done when `wteam run` exits and prints the stop report.
 If `.wteam/<slug>/phases/validate/PASSED.md` is missing after Run, run `wteam phase validate --slug <slug>` once (local → mid → out Goldfish). On FAIL: `wteam requeue NN --note "<finding>"` for named tickets, short `wteam run`, re-validate (cap two). The orchestrator should have done this already; the skill only backs it.
 
 Done when validate PASSED exists or the user accepts remaining findings.
+
+Then run each extra phase settled at intake: `wteam phase <name> --slug <slug> [--input <path>]`, with the same FAIL handling. Other phases are files: `phases/<name>.toml` in `.wteam/` or `$WTEAM_CONFIG_DIR` lists personas whose role prompts sit in `roles/`. Run one with `wteam phase <name> --slug <slug> [--input <path>]`; the stamp lands at `.wteam/<slug>/phases/<name>/PASSED.md`.
 
 ## 7. Relay
 

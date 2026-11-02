@@ -475,7 +475,11 @@ pub fn one_turn_def(
     let team = state::load(&ctx.paths)?.run.team;
     let dirs = crate::config::search_dirs(&ctx.paths, &team);
     let search = dirs.agents.clone();
-    let def = agents::load(def_name, &search)?;
+    let def = if phase.is_some() {
+        agents::load_persona(def_name, &search)?
+    } else {
+        agents::load(def_name, &search)?
+    };
     let adapter = adapters::for_cli(&def.cli)?;
     let cwd = turn_dir(ctx, agent)?;
     let permissions = if def.cli == "fake" {
@@ -489,8 +493,12 @@ pub fn one_turn_def(
     };
     let role_prompt = if first {
         let base = agents::role_prompt(def.prompt.as_deref().unwrap_or(def_name), &search)?;
+        let focus = match ctx.team.node_prompt(&role, &ctx.paths.root)? {
+            Some(p) => format!("\n\n## Role focus\n\n{p}"),
+            None => String::new(),
+        };
         Some(format!(
-            "{base}\n\n{}",
+            "{base}{focus}\n\n{}",
             crate::team::roster_section(&ctx.team, agent)
         ))
     } else {

@@ -317,6 +317,14 @@ fn skill_names_each_step_command() {
 }
 
 #[test]
+fn skill_intake_picks_a_team_and_phases_from_their_descriptions() {
+    let md = std::fs::read_to_string(root().join("skills/wteam/SKILL.md")).unwrap();
+    for n in ["wteam --json teams", "wteam --json phases", "--team <team>"] {
+        assert!(md.contains(n), "SKILL.md must mention `{n}`");
+    }
+}
+
+#[test]
 fn worker_declares_extras_with_flag() {
     assert_mentions("worker", &["--extra", "outside `Files:`"]);
 }

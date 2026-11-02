@@ -29,6 +29,18 @@ The [Terminal-Bench harness](bench/terminal-bench/harness/README.md) runs the sa
 
 Fresh-context “Goldfish” phases (`wteam phase plan-review` / `wteam phase validate`) follow the same idea as Google’s [Elephant-Goldfish Model](https://github.com/google/elephant-goldfish-model) ([announcement](https://opensource.googleblog.com/2026/10/introducing-elephant-goldfish-model-plugin.html)): deep Elephant context (planner / orchestrator), then isolated critics on the artifact. New workflows are roles + a persona list; the CLI keeps stamps and restarts, not the loop brains.
 
+A phase is a file, `phases/<name>.toml`, in `.wteam/` or `$WTEAM_CONFIG_DIR` (the built-ins ship the same way and can be overridden there):
+
+```toml
+description = "Two fresh reviewers check a document. Use for ADRs and reports."  # shown by `wteam phases`
+personas = ["doc-claims", "doc-critic"]   # run in order, fresh session each
+requires_input = true                     # needs at least one --input <path>
+requires_pickup = false                   # plan-review sets this
+brief = "Review the inputs for {slug}.\n"  # {slug} and {ticket_ids} are substituted
+```
+
+Each persona needs a role prompt, `roles/<name>.md`, beside the phase file. An agent TOML is optional; without one the persona runs on `claude` with its default model and the `review` profile. Run it with `wteam phase doc-review --input docs/adr.md`. Give a team the same hint with a graph attribute, `graph [description="..."]`; `wteam teams` lists project, saved and built-in teams with theirs, and the wteam skill uses both lists to propose a team and phases at intake.
+
 ## Install
 
 macOS and Linux (including WSL), from the latest GitHub release:
@@ -75,7 +87,8 @@ Every command accepts `--json`. The full walkthrough is in the
 |---|---|
 | `init` | Create `.wteam/` and an effort directory |
 | `pickup` | Import planning output and verify it |
-| `phase`, `phase-verdict` | Generic Goldfish phase (presets: `plan-review`, `validate`; `--persona`) |
+| `phase`, `phase-verdict` | Generic Goldfish phase from a phase file (built-ins: `plan-review`, `validate`; `--persona`, `--input`) |
+| `teams`, `phases` | List the teams and phases available here, with what each is for |
 | `plan-review`, `plan-verdict` | Aliases for `phase plan-review` / its verdict |
 | `status`, `ready` | Show tickets and agents; list ready tickets |
 | `dispatch`, `submit`, `verdict`, `block`, `requeue` | Move tickets through review |
@@ -135,6 +148,13 @@ three times with backoff. A turn whose process died is reset on the next command
 `script=`), run at `submit`. A non-zero exit, or a timeout (600 s by default,
 `timeout=` per node), returns the ticket to the worker with the output tail as the finding.
 A human gate (`shape=hexagon`) holds a passed ticket until `wteam approve <ticket>`.
+
+## Skills per step
+
+A ticket's optional `**Skill:**` and `**Review skill:**` lines, and a node's
+`skill=` attribute, name a skill for the worker or reviewers. Every brief, review
+request and fix request opens with "Use the `<skill>` skill for this turn", so the
+instruction survives session reuse.
 A pass path that reaches a reviewer who already passed the round blocks the ticket
 as a pass cycle.
 

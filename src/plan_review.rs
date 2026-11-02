@@ -8,8 +8,6 @@ use crate::phase::{self, PhaseReport, PhaseVerdict};
 pub use phase::PersonaOutcome;
 pub use phase::VerdictKind as PlanVerdictKind;
 
-pub const DEFAULT_PERSONAS: [&str; 3] = ["spec-comprehension", "spec-critic", "spec-readiness"];
-
 pub type PlanVerdict = PhaseVerdict;
 pub type PlanReviewReport = PhaseReport;
 
@@ -24,7 +22,9 @@ pub fn record_verdict(
 }
 
 pub fn run(ctx: &Ctx, personas: &[&str]) -> Result<PhaseReport> {
-    phase::run(ctx, "plan-review", personas, None)
+    let overrides: Vec<String> = personas.iter().map(|p| p.to_string()).collect();
+    let def = phase::resolve(ctx, "plan-review", &overrides)?;
+    phase::run(ctx, "plan-review", &def, None, &[])
 }
 
 pub fn report_out(r: &PhaseReport) -> (String, serde_json::Value) {

@@ -1,5 +1,6 @@
 //! One module per subcommand group. Each returns an [`Out`]: human text plus JSON.
 
+pub mod catalog;
 pub mod config;
 pub mod graph;
 pub mod init;
@@ -93,6 +94,8 @@ pub fn run(g: &Global, cmd: &Command) -> Result<Out> {
         Command::Refine(a) => refine::run(g, a),
         Command::Role(a) => role::run(g, a),
         Command::Graph(a) => graph::run(g, a),
+        Command::Teams => catalog::teams(g),
+        Command::Phases => catalog::phases(g),
         Command::Permissions(a) => permissions::run(g, a),
         Command::Config(c) => config::run(g, c),
         Command::Setup(a) => setup::run(a),

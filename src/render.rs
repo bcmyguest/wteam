@@ -121,6 +121,8 @@ mod tests {
             status_label: String::new(),
             files: vec![],
             verify: vec![],
+            skill: None,
+            review_skill: None,
             criteria: vec![],
             path: PathBuf::new(),
             body: String::new(),

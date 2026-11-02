@@ -1,0 +1,11 @@
+# Built-in phase. Override with .wteam/phases/validate.toml or
+# $WTEAM_CONFIG_DIR/phases/validate.toml.
+description = "Three fresh reviewers check landed work at ticket, area and whole-effort scope. Use after a run."
+personas = ["validate-local", "validate-mid", "validate-out"]
+brief = """
+Effort `.wteam/{slug}/` has implementation work on disk.
+Zoom per your role: local tickets, then mid, then out.
+Read `spec.md`, tickets, and the tree. Run Verify commands yourself.
+Fresh session — no prior chat.
+Ticket ids: {ticket_ids}
+"""

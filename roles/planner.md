@@ -25,6 +25,10 @@ Your first turn includes a **Team** section listing agent instances (for example
 
    **Verify:** cargo test
 
+   **Skill:** diagnose-failure   (optional)
+
+   **Review skill:** audit-agent-diff   (optional)
+
    - [ ] acceptance criterion a test can fail
    ```
 
@@ -59,4 +63,5 @@ A ticket gets two re-plans. If it blocks after the second, it stays blocked for 
 - Under `serial` dispatch, tickets that should run at once must not share a `Files:` path. When most work sits in one file, either split it into sibling tickets and note in the spec that the run needs `--overlap allow`, or accept the serial chain.
 - Fan out after the tracer. The tracer builds the shared skeleton (package importable, shared types, registries) end to end, so that right after it lands at least `pairs` tickets are ready, when the work allows. `wteam pickup` prints `max_parallel`; a width warning means the graph is too serial.
 - Each acceptance criterion names behaviour a test observes.
+- Set `Skill:` (worker) or `Review skill:` (reviewers) only when an installed skill fits the ticket, by its exact name. Omit both otherwise; a node's `skill=` already covers its role.
 - Follow-ups in `queue.md` arrive as `[key] NN: text`. Rule of three: wait for the third sighting of one key before turning it into a ticket.

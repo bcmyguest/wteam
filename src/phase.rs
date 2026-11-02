@@ -1,8 +1,9 @@
 //! Generic Goldfish phases: sequence configurable personas (fresh session each),
 //! stamp pass/fail. Workflow brains live in roles; this module is state + turns.
 //!
-//! Presets (`plan-review`, `validate`) are persona lists only. New workflows =
-//! new roles + a preset or `--persona`, not new engine code.
+//! A phase is a definition file, `phases/<name>.toml`, found beside the agent search dirs
+//! (`.wteam/phases/`, then `$WTEAM_CONFIG_DIR/phases/`) or built in (`plan-review`,
+//! `validate`). New workflows = new roles + a phase file or `--persona`, not new engine code.
 
 use std::fs;
 use std::path::PathBuf;
@@ -18,13 +19,79 @@ use crate::state;
 use crate::transport::resume;
 use crate::work;
 
-/// Built-in persona chains. Unknown phase names require `--persona`.
-pub fn preset_personas(phase: &str) -> Option<&'static [&'static str]> {
-    match phase {
-        "plan-review" => Some(&["spec-comprehension", "spec-critic", "spec-readiness"]),
-        "validate" => Some(&["validate-local", "validate-mid", "validate-out"]),
+/// A phase definition (`phases/<name>.toml`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseDef {
+    /// What the phase checks and when to use it; shown by `wteam phases`.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Persona agent names, run in order.
+    pub personas: Vec<String>,
+    /// Prompt text for every persona; `{slug}` and `{ticket_ids}` are substituted.
+    #[serde(default)]
+    pub brief: Option<String>,
+    /// Refuse to run until `wteam pickup` reports no problems.
+    #[serde(default)]
+    pub requires_pickup: bool,
+    /// Refuse to run without at least one `--input`.
+    #[serde(default)]
+    pub requires_input: bool,
+}
+
+/// Phases compiled in; a `phases/<name>.toml` in `.wteam/` or the config dir overrides one.
+pub const BUILTIN_PHASES: [&str; 2] = ["plan-review", "validate"];
+
+fn builtin_phase(name: &str) -> Option<&'static str> {
+    match name {
+        "plan-review" => Some(include_str!("../phases/plan-review.toml")),
+        "validate" => Some(include_str!("../phases/validate.toml")),
         _ => None,
     }
+}
+
+/// Definition of phase `name`: `phases/<name>.toml` beside the first `search` dir that has
+/// one, else the built-in. `None` when neither exists.
+pub fn load_def(name: &str, search: &[PathBuf]) -> Result<Option<PhaseDef>> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        bail!("phase name `{name}` must be letters, digits, `-` or `_`");
+    }
+    for dir in search {
+        let Some(parent) = dir.parent() else { continue };
+        let file = parent.join("phases").join(format!("{name}.toml"));
+        if file.is_file() {
+            let raw =
+                fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+            return toml::from_str(&raw)
+                .map(Some)
+                .with_context(|| format!("parsing {}", file.display()));
+        }
+    }
+    builtin_phase(name)
+        .map(|src| toml::from_str(src).with_context(|| format!("parsing built-in phase {name}")))
+        .transpose()
+}
+
+/// The definition `wteam phase <name>` runs: the phase file, with `personas` replaced by
+/// `overrides` when given. An unknown name needs `overrides`.
+pub fn resolve(ctx: &Ctx, name: &str, overrides: &[String]) -> Result<PhaseDef> {
+    let team = state::load(&ctx.paths)?.run.team;
+    let search = crate::config::search_dirs(&ctx.paths, &team).agents;
+    let mut def = match load_def(name, &search)? {
+        Some(d) => d,
+        None if !overrides.is_empty() => PhaseDef::default(),
+        None => bail!(
+            "unknown phase `{name}`: no phases/{name}.toml in .wteam/ or the config dir, and no built-in; pass --persona"
+        ),
+    };
+    if !overrides.is_empty() {
+        def.personas = overrides.to_vec();
+    }
+    Ok(def)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,20 +153,35 @@ pub fn record_verdict(
     Ok(v)
 }
 
-/// Run `personas` for `phase` in order. Fresh session each. Stops at first FAIL.
-pub fn run(ctx: &Ctx, phase: &str, personas: &[&str], ticket: Option<&str>) -> Result<PhaseReport> {
-    if personas.is_empty() {
-        bail!("phase `{phase}` needs at least one persona (pass --persona or use a preset)");
+/// Run `def`'s personas for `phase` in order. Fresh session each. Stops at first FAIL.
+pub fn run(
+    ctx: &Ctx,
+    phase: &str,
+    def: &PhaseDef,
+    ticket: Option<&str>,
+    inputs: &[PathBuf],
+) -> Result<PhaseReport> {
+    if def.personas.is_empty() {
+        bail!(
+            "phase `{phase}` needs at least one persona (pass --persona or list them in its phase file)"
+        );
+    }
+    if def.requires_input && inputs.is_empty() {
+        bail!("phase `{phase}` needs at least one --input <path>");
+    }
+    for i in inputs {
+        if !ctx.paths.root.join(i).is_file() {
+            bail!("input {} is not a file", i.display());
+        }
     }
     if backup::pending(&ctx.paths) {
         let _ = backup::restore(&ctx.paths)?;
     }
-    // plan-review gates on a clean pickup; validate runs after code lands.
-    if phase == "plan-review" {
+    if def.requires_pickup {
         let report = pickup::pickup(&ctx.paths, None)?;
         if !report.problems.is_empty() {
             bail!(
-                "pickup has problems; fix them before plan-review:\n{}",
+                "pickup has problems; fix them before {phase}:\n{}",
                 report.problems.join("\n")
             );
         }
@@ -109,8 +191,8 @@ pub fn run(ctx: &Ctx, phase: &str, personas: &[&str], ticket: Option<&str>) -> R
     let _ = fs::remove_file(ctx.paths.phase_passed_file(phase));
 
     let mut outcomes = Vec::new();
-    for (i, persona) in personas.iter().enumerate() {
-        let outcome = run_persona(ctx, phase, persona, i + 1, ticket)?;
+    for (i, persona) in def.personas.iter().enumerate() {
+        let outcome = run_persona(ctx, phase, def, persona, i + 1, ticket, inputs)?;
         let failed = outcome.kind == VerdictKind::Fail;
         outcomes.push(outcome);
         if failed {
@@ -134,13 +216,15 @@ pub fn run(ctx: &Ctx, phase: &str, personas: &[&str], ticket: Option<&str>) -> R
 fn run_persona(
     ctx: &Ctx,
     phase: &str,
+    def: &PhaseDef,
     persona: &str,
     step: usize,
     ticket: Option<&str>,
+    inputs: &[PathBuf],
 ) -> Result<PersonaOutcome> {
     let instance = format!("{persona}.1");
     let _ = fs::remove_file(ctx.paths.phase_pending_file(phase));
-    let prompt = persona_prompt(ctx, phase, persona, step, ticket)?;
+    let prompt = persona_prompt(ctx, phase, def, persona, step, ticket, inputs)?;
     let turns = state::load(&ctx.paths)?
         .agents
         .get(&instance)
@@ -198,9 +282,11 @@ fn run_persona(
 fn persona_prompt(
     ctx: &Ctx,
     phase: &str,
+    def: &PhaseDef,
     persona: &str,
     step: usize,
     ticket: Option<&str>,
+    inputs: &[PathBuf],
 ) -> Result<String> {
     let slug = &ctx.paths.slug;
     let phase_dir = format!(".wteam/{slug}/{}", ctx.paths.phase_rel(phase));
@@ -209,35 +295,33 @@ fn persona_prompt(
         .map(|t| t.id)
         .collect::<Vec<_>>()
         .join(", ");
-    let body = match phase {
-        "plan-review" => format!(
-            "Read `spec.md` and every file under `tickets/` in `.wteam/{slug}/`.\n\
-             Fresh session — no prior chat.\n\
-             Ticket ids present: {ids}\n"
-        ),
-        "validate" => {
-            let focus = match ticket {
-                Some(t) => format!(
-                    "Focus ticket `{t}` first (local zoom), then widen if your role says so.\n"
-                ),
-                None => "Zoom per your role: local tickets, then mid, then out.\n".into(),
-            };
-            format!(
-                "Effort `.wteam/{slug}/` has implementation work on disk.\n\
-                 {focus}\
-                 Read `spec.md`, tickets, and the tree. Run Verify commands yourself.\n\
-                 Fresh session — no prior chat.\n\
-                 Ticket ids: {ids}\n"
-            )
-        }
-        _ => format!(
+    let body = match &def.brief {
+        Some(b) => b.replace("{slug}", slug).replace("{ticket_ids}", &ids),
+        None => format!(
             "Phase `{phase}` step for effort `.wteam/{slug}/`.\n\
              Fresh session. Ticket ids: {ids}\n"
         ),
     };
+    let focus = match ticket {
+        Some(t) => {
+            format!("Focus ticket `{t}` first (local zoom), then widen if your role says so.\n")
+        }
+        None => String::new(),
+    };
+    let listed: String = inputs
+        .iter()
+        .map(|i| format!("- `{}`\n", i.display()))
+        .collect();
+    let inputs = if listed.is_empty() {
+        String::new()
+    } else {
+        format!("Inputs:\n{listed}")
+    };
     Ok(format!(
         "Phase `{phase}` step {step}, persona `{persona}`.\n\
          {body}\
+         {focus}\
+         {inputs}\
          Write findings under `{phase_dir}/`, then:\n\
          `wteam phase-verdict pass|fail --file <path>`\n\
          (`wteam plan-verdict` is an alias when phase is plan-review.)\n"
@@ -304,4 +388,48 @@ pub fn report_out(r: &PhaseReport) -> (String, serde_json::Value) {
             "stamp": r.stamp.as_ref().map(|p| p.display().to_string()),
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn built_in_phases_parse() {
+        let plan = load_def("plan-review", &[]).unwrap().unwrap();
+        assert_eq!(
+            plan.personas,
+            ["spec-comprehension", "spec-critic", "spec-readiness"]
+        );
+        assert!(plan.requires_pickup);
+        let validate = load_def("validate", &[]).unwrap().unwrap();
+        assert_eq!(validate.personas.len(), 3);
+        assert!(!validate.requires_pickup);
+        assert!(validate.brief.unwrap().contains("{ticket_ids}"));
+        assert_eq!(load_def("nope", &[]).unwrap(), None);
+    }
+
+    #[test]
+    fn phase_file_beside_a_search_dir_wins_and_rejects_unknown_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let agents = dir.path().join("agents");
+        std::fs::create_dir_all(dir.path().join("phases")).unwrap();
+        std::fs::write(
+            dir.path().join("phases/validate.toml"),
+            "personas = [\"a\"]\nrequires_input = true\n",
+        )
+        .unwrap();
+        let def = load_def("validate", std::slice::from_ref(&agents))
+            .unwrap()
+            .unwrap();
+        assert_eq!(def.personas, ["a"]);
+        assert!(def.requires_input);
+        std::fs::write(
+            dir.path().join("phases/bad.toml"),
+            "personas = []\ntypo = 1\n",
+        )
+        .unwrap();
+        assert!(load_def("bad", std::slice::from_ref(&agents)).is_err());
+        assert!(load_def("../x", &[]).is_err());
+    }
 }

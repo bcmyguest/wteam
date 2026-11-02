@@ -1,0 +1,10 @@
+# Built-in phase. Override with .wteam/phases/plan-review.toml or
+# $WTEAM_CONFIG_DIR/phases/plan-review.toml.
+description = "Three fresh reviewers check spec.md and the tickets before a run: comprehension, critic, readiness. Use before every run."
+personas = ["spec-comprehension", "spec-critic", "spec-readiness"]
+requires_pickup = true
+brief = """
+Read `spec.md` and every file under `tickets/` in `.wteam/{slug}/`.
+Fresh session — no prior chat.
+Ticket ids present: {ticket_ids}
+"""

@@ -4,8 +4,9 @@ pub mod agents;
 pub mod dot;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 
 /// Default seconds a command gate may run before it is killed.
@@ -94,8 +95,10 @@ pub enum NodeKind {
         count: u32,
         /// Permission profile override.
         profile: Option<String>,
-        /// Role prompt override (`@file.md` or inline).
+        /// Text appended to the agent's role prompt (`@file.md` or inline).
         prompt: Option<String>,
+        /// Skill named in every brief this role receives.
+        skill: Option<String>,
     },
     /// `shape=parallelogram`: a shell check; non-zero exit or timeout is a finding.
     Command {
@@ -149,6 +152,7 @@ impl Team {
                 count,
                 profile: None,
                 prompt: None,
+                skill: None,
             },
             label: None,
         };
@@ -222,11 +226,18 @@ impl Team {
                             anyhow!("node {}: count={v:?} is not an integer or $pairs", node.id)
                         })?,
                     };
+                    let skill = get("skill");
+                    if let Some(s) = &skill
+                        && !crate::work::is_skill_name(s)
+                    {
+                        bail!("node {}: skill={s:?} is not a skill name", node.id);
+                    }
                     NodeKind::Agent {
                         agent: get("agent").unwrap_or_else(|| node.id.clone()),
                         count,
                         profile: get("profile"),
                         prompt: get("prompt"),
+                        skill,
                     }
                 }
                 "parallelogram" => NodeKind::Command {
@@ -287,6 +298,33 @@ impl Team {
             handoff_tokens,
             session_tokens,
         })
+    }
+
+    /// The node's `skill=` for `role`.
+    pub fn node_skill(&self, role: &str) -> Option<&str> {
+        match self.roles.get(role).map(|r| &r.kind) {
+            Some(NodeKind::Agent { skill, .. }) => skill.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The node's `prompt=` for `role`: inline text, or the file after `@`, relative to `root`.
+    pub fn node_prompt(&self, role: &str, root: &Path) -> Result<Option<String>> {
+        let Some(Role {
+            kind: NodeKind::Agent {
+                prompt: Some(p), ..
+            },
+            ..
+        }) = self.roles.get(role)
+        else {
+            return Ok(None);
+        };
+        match p.strip_prefix('@') {
+            Some(file) => std::fs::read_to_string(root.join(file))
+                .map(Some)
+                .with_context(|| format!("node {role}: reading prompt {file}")),
+            None => Ok(Some(p.clone())),
+        }
     }
 
     /// Outgoing links from `role` that route `event`.
@@ -420,7 +458,8 @@ mod tests {
                 agent: "a".into(),
                 count: 1,
                 profile: None,
-                prompt: None
+                prompt: None,
+                skill: None
             }
         );
         assert_eq!(
@@ -433,6 +472,28 @@ mod tests {
         assert_eq!(t.roles["c"].kind, NodeKind::Human);
         assert_eq!(t.count("d"), 2);
         assert_eq!(t.roles["d"].label.as_deref(), Some("D"));
+    }
+
+    #[test]
+    fn node_prompt_is_inline_or_read_from_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("focus.md"), "from file").unwrap();
+        let t = team(
+            "digraph t { a [prompt=\"be strict\"]; b [prompt=\"@focus.md\"]; c; d [prompt=\"@missing.md\"] }",
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            t.node_prompt("a", dir.path()).unwrap().as_deref(),
+            Some("be strict")
+        );
+        assert_eq!(
+            t.node_prompt("b", dir.path()).unwrap().as_deref(),
+            Some("from file")
+        );
+        assert_eq!(t.node_prompt("c", dir.path()).unwrap(), None);
+        assert_eq!(t.node_prompt("nope", dir.path()).unwrap(), None);
+        assert!(t.node_prompt("d", dir.path()).is_err());
     }
 
     #[test]

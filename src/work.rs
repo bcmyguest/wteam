@@ -15,6 +15,10 @@
 //!
 //! **Verify:** cargo test -p x     (optional, wteam extension; `;`-separated)
 //!
+//! **Skill:** diagnose-failure       (optional, wteam extension: the worker's skill)
+//!
+//! **Review skill:** audit-agent-diff (optional, wteam extension: every reviewer's skill)
+//!
 //! - [ ] Acceptance criterion
 //! ```
 
@@ -38,6 +42,10 @@ pub struct Ticket {
     pub status_label: String,
     pub files: Vec<String>,
     pub verify: Vec<String>,
+    /// Skill the worker uses on every turn for this ticket.
+    pub skill: Option<String>,
+    /// Skill each reviewer uses on every turn for this ticket.
+    pub review_skill: Option<String>,
     /// `(checked, text)` acceptance criteria.
     pub criteria: Vec<(bool, String)>,
     pub path: PathBuf,
@@ -54,6 +62,8 @@ enum Field {
     Status,
     Files,
     Verify,
+    Skill,
+    ReviewSkill,
 }
 
 /// Split `**Label:** rest` into the label and the rest of the line.
@@ -97,6 +107,20 @@ pub fn split_list(value: &str, sep: char) -> Vec<String> {
         .collect()
 }
 
+/// A `Skill:` value without backticks; `None` when empty.
+fn skill_name(raw: &str) -> Option<String> {
+    let s = raw.trim().trim_matches('`').trim();
+    (!s.is_empty()).then(|| s.to_string())
+}
+
+/// Whether `s` looks like a skill name: lowercase letters, digits, `-`, `_`, and `:` for
+/// namespaced (plugin) skills.
+pub fn is_skill_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | ':'))
+}
+
 /// Parse one ticket file's markdown. `path` is recorded, not read.
 pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
     let mut id = None;
@@ -108,6 +132,7 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
         String::new(),
         String::new(),
     );
+    let (mut skill, mut review_skill) = (String::new(), String::new());
     let mut criteria = Vec::new();
     let mut field = Field::None;
     let mut in_criteria = false;
@@ -152,6 +177,8 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
                 "status" => Field::Status,
                 "files" => Field::Files,
                 "verify" => Field::Verify,
+                "skill" => Field::Skill,
+                "review skill" => Field::ReviewSkill,
                 _ => Field::None,
             };
             let target = match field {
@@ -160,6 +187,8 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
                 Field::Status => &mut status,
                 Field::Files => &mut files,
                 Field::Verify => &mut verify,
+                Field::Skill => &mut skill,
+                Field::ReviewSkill => &mut review_skill,
                 Field::None => continue,
             };
             target.push_str(rest);
@@ -171,6 +200,8 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
             Field::Status => &mut status,
             Field::Files => &mut files,
             Field::Verify => &mut verify,
+            Field::Skill => &mut skill,
+            Field::ReviewSkill => &mut review_skill,
             Field::None => continue,
         };
         if !line.trim().is_empty() {
@@ -192,6 +223,8 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
         status_label: status,
         files: split_list(&files, ','),
         verify: split_list(&verify, ';'),
+        skill: skill_name(&skill),
+        review_skill: skill_name(&review_skill),
         criteria,
         path: path.to_path_buf(),
         body: markdown.to_string(),
@@ -581,6 +614,22 @@ mod tests {
         parse_ticket(md, Path::new("t.md")).unwrap()
     }
 
+    #[test]
+    fn skill_fields_are_optional_and_unquoted() {
+        let k = parse(TEMPLATE);
+        assert_eq!((k.skill, k.review_skill), (None, None));
+        let md = TEMPLATE.replace(
+            "**Verify:**",
+            "**Skill:** `diagnose-failure`\n\n**Review skill:** audit-agent-diff\n\n**Verify:**",
+        );
+        let k = parse(&md);
+        assert_eq!(k.skill.as_deref(), Some("diagnose-failure"));
+        assert_eq!(k.review_skill.as_deref(), Some("audit-agent-diff"));
+        assert_eq!(k.verify, ["cargo test -p x", "cargo clippy"]);
+        assert!(is_skill_name("plugin:skill-1"));
+        assert!(!is_skill_name("Diagnose failure"));
+    }
+
     fn t(id: &str, blocked: &[&str], files: &[&str]) -> Ticket {
         Ticket {
             id: id.into(),
@@ -590,6 +639,8 @@ mod tests {
             status_label: String::new(),
             files: files.iter().map(|s| s.to_string()).collect(),
             verify: vec![],
+            skill: None,
+            review_skill: None,
             criteria: vec![],
             path: PathBuf::from(format!("{id}.md")),
             body: String::new(),

@@ -400,15 +400,42 @@ fn dispatch_role(ctx: &Ctx) -> String {
 }
 
 /// The worker brief: ticket, round, earlier findings and notes, and how to report back.
+/// The skills `instance` uses on this turn: its node's `skill=`, then the ticket's own.
+fn skill_line(ctx: &Ctx, instance: &str, ticket_skill: Option<&str>) -> String {
+    let (role, _) = parse_instance(instance);
+    let mut skills: Vec<&str> = Vec::new();
+    for s in [ctx.team.node_skill(&role), ticket_skill]
+        .into_iter()
+        .flatten()
+    {
+        if !skills.contains(&s) {
+            skills.push(s);
+        }
+    }
+    if skills.is_empty() {
+        return String::new();
+    }
+    let names = skills
+        .iter()
+        .map(|s| format!("`{s}`"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let plural = if skills.len() > 1 { "s" } else { "" };
+    format!(
+        "Use the {names} skill{plural} for this turn. If one is not available to you, say so in what you submit and continue without it.\n\n"
+    )
+}
+
 fn brief(
     t: &Ticket,
     round: u32,
     last: Option<&Verdict>,
     note: Option<&str>,
     contract: &str,
+    skills: &str,
 ) -> String {
     let mut b = format!(
-        "Ticket {} (round {round})\n\n{}\n{contract}",
+        "Ticket {} (round {round})\n\n{skills}{}\n{contract}",
         t.id,
         t.body.trim()
     );
@@ -724,7 +751,7 @@ fn ticket_dir(ctx: &Ctx, ticket: &str) -> Result<PathBuf> {
 }
 
 /// The review request mail: ticket, contract pointer, `context`, diff and verdict instructions.
-fn review_request(ctx: &Ctx, t: &Ticket, from: &str, context: &str) -> Result<String> {
+fn review_request(ctx: &Ctx, t: &Ticket, from: &str, to: &str, context: &str) -> Result<String> {
     let extras = extras_of(&crate::state::load(&ctx.paths)?, &t.id);
     let diff = ticket_dir(ctx, &t.id)
         .and_then(|dir| ticket_diff(&dir, t, &extras))
@@ -741,10 +768,11 @@ fn review_request(ctx: &Ctx, t: &Ticket, from: &str, context: &str) -> Result<St
     }
     let contract = format!("{}{}", contract_note(ctx), project_notes(ctx)?);
     Ok(format!(
-        "Review request: ticket {id} from {from}\n\n{body}\n{contract}\n{context}\n{listed}Diff of the ticket's files and extras against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then write the verdict sections (FINDINGS, NOTES, FOLLOW-UPS) to a file and run exactly one of:\n- `wteam verdict {id} pass --file <path>`\n- `wteam verdict {id} fail --file <path>` (one `- ` bullet per blocking finding)\n",
+        "Review request: ticket {id} from {from}\n\n{skills}{body}\n{contract}\n{context}\n{listed}Diff of the ticket's files and extras against HEAD:\n~~~~diff\n{diff}\n~~~~\n\nReview against the ticket's acceptance criteria. Then write the verdict sections (FINDINGS, NOTES, FOLLOW-UPS) to a file and run exactly one of:\n- `wteam verdict {id} pass --file <path>`\n- `wteam verdict {id} fail --file <path>` (one `- ` bullet per blocking finding)\n",
         id = t.id,
         body = t.body.trim(),
         contract = contract,
+        skills = skill_line(ctx, to, t.review_skill.as_deref()),
     ))
 }
 
@@ -880,6 +908,7 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
                 last.as_ref(),
                 note.as_deref(),
                 &format!("{}{notes}", contract_note(ctx)),
+                &skill_line(ctx, &agent, t.skill.as_deref()),
             ),
         )
     })();
@@ -1165,7 +1194,13 @@ fn route_submission(ctx: &Ctx, t: &Ticket, agent: &str, summary: &str) -> Result
                     ts.assignee = Some(reviewer.clone());
                     Ok(())
                 })?;
-                let body = review_request(ctx, t, agent, &format!("Worker summary:\n{summary}\n"))?;
+                let body = review_request(
+                    ctx,
+                    t,
+                    agent,
+                    &reviewer,
+                    &format!("Worker summary:\n{summary}\n"),
+                )?;
                 return mail_and_deliver(ctx, &reviewer, agent, &t.id, &body);
             }
             Some(NodeKind::Command { script, timeout }) => {
@@ -1234,7 +1269,7 @@ fn advance_passed(
                     .iter()
                     .for_each(|n| context.push_str(&format!("- {n}\n")));
             }
-            let body = review_request(ctx, t, by, &context)?;
+            let body = review_request(ctx, t, by, &reviewer, &context)?;
             mail_and_deliver(ctx, &reviewer, by, &t.id, &body)
         }
         Hop::Human { role } => crate::state::with_state(&ctx.paths, |s| {
@@ -1467,8 +1502,9 @@ fn fail_round(
         crate::mailbox::append_ticket(&ctx.paths, "orchestrator.1", by, Some(&t.id), &note)?;
     } else {
         let mut body = format!(
-            "Review of ticket {} failed (round {rounds}). Findings:\n",
-            t.id
+            "Review of ticket {} failed (round {rounds}).\n\n{}Findings:\n",
+            t.id,
+            skill_line(ctx, worker, t.skill.as_deref())
         );
         verdict
             .findings

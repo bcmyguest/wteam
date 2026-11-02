@@ -1,6 +1,6 @@
 // planner -> orchestrator -> N x (worker <-> reviewer)
 digraph default {
-  graph [max_visits=3, handoff_tokens=150000]
+  graph [description="Worker/reviewer pairs, one reviewer per worker. Use for most multi-ticket builds.", max_visits=3, handoff_tokens=150000]
   planner      [agent="planner"]
   orchestrator [agent="orchestrator"]
   worker       [agent="worker", count="$pairs"]

@@ -31,7 +31,8 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `role <name>` | Print a resolved role prompt (project, config dir, then built-in) |
 | `graph` | Team or work graph as Mermaid (`--work`, `--team <name>`) |
 | `permissions` | Profile translation matrix (`--profile`, `--cli`; default CLIs omit `pi`, use `--cli pi`) |
-| `phase` | Goldfish phases (`plan-review`, `validate`, …) with fresh-context agents |
+| `phase` | Goldfish phases from `phases/<name>.toml` (built-ins `plan-review`, `validate`; `--input <path>`) with fresh-context agents |
+| `teams`, `phases` | List available teams and phases with their `description` |
 | `config promote\|list\|show` | Saved teams under `~/.config/wteam`. In progress. |
 | `setup` | Detect herdr and pick a transport. In progress. |
 
@@ -55,11 +56,13 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | Attribute | Where | Meaning |
 |---|---|---|
 | `max_visits` | graph | Review rounds before a ticket is blocked. Default 3. |
+| `description` | graph | What the team is for; shown by `wteam teams` and used to pick a team at intake |
 | `handoff_tokens` | graph | Context size that triggers an orchestrator handoff. The effective threshold is `min(handoff_tokens, 0.75 × context_window)`. |
 | `agent` | node | Agent definition name |
 | `count` | node | Instances; `$pairs` takes the `--pairs` value. Default 1. |
 | `profile` | node | Overrides the agent's permission profile |
-| `prompt` | node | Overrides the agent's role prompt |
+| `prompt` | node | Appended to the agent's role prompt under `## Role focus`; inline text or `@path` relative to the repo root |
+| `skill` | node | Skill named in every brief and review request this role receives, alongside the ticket's `Skill:` / `Review skill:` |
 | `shape` | node | `box` agent, `parallelogram` command, `hexagon` human gate |
 | `script` | command node | Script run from the repo root |
 | `timeout` | command node | Seconds before the script counts as failed. Default 600. |
