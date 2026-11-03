@@ -84,6 +84,27 @@ the worker with the output tail as the finding. A human gate holds a passed tick
 until `wteam approve <ticket>`. A human gate cannot directly follow `submit`. A pass
 path that reaches a reviewer who already passed the round blocks the ticket.
 
+### Multi-step teams
+
+A worker step is any agent node with a `submit` edge. When a PASS path (through
+reviewers, command nodes or human gates) reaches another worker step, that step's
+instance on the same pair takes the ticket, with a brief that names its `skill=`.
+The ticket keeps its worktree and commits once, after the last step's reviewers
+pass. A FAIL goes back to the step whose reviewer failed it. Every step needs the
+first step's `count`. `continue=true` on a step moves the previous step's session
+to it when the session fits under `session_tokens`; a resumed session skips the
+new step's role prompt, so put per-step instructions in `skill=`.
+A blocked ticket that is requeued resumes at its step, with the requeue note in
+its brief; `requeue --fresh` discards the work and starts again at the first step.
+
+```dot
+plan     [agent="worker", count="$pairs", skill="plan-experiment"]
+approval [shape=hexagon]
+run      [agent="worker", count="$pairs", skill="run-experiment", continue=true]
+plan_rev -> approval [on=pass]
+approval -> run      [on=pass]
+```
+
 ## Work graph
 
 The work graph holds tickets and their `Blocked by` links. `wteam ready` lists

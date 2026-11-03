@@ -105,6 +105,9 @@ pub struct TicketState {
     /// Replaced by each submit, cleared on dispatch.
     #[serde(default)]
     pub extras: Vec<String>,
+    /// Worker step holding the ticket in a multi-step team; `None` is the first step.
+    #[serde(default)]
+    pub step: Option<String>,
     /// Dispatch attempts that failed in a row. Reset by a successful dispatch and by `requeue`.
     /// The ticket blocks at `DISPATCH_ATTEMPTS`.
     #[serde(default)]

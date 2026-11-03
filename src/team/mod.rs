@@ -99,6 +99,9 @@ pub enum NodeKind {
         prompt: Option<String>,
         /// Skill named in every brief this role receives.
         skill: Option<String>,
+        /// `continue=true` on a step node: take over the previous step's session when it fits
+        /// under `session_tokens`.
+        continue_session: bool,
     },
     /// `shape=parallelogram`: a shell check; non-zero exit or timeout is a finding.
     Command {
@@ -153,6 +156,7 @@ impl Team {
                 profile: None,
                 prompt: None,
                 skill: None,
+                continue_session: false,
             },
             label: None,
         };
@@ -238,6 +242,13 @@ impl Team {
                         profile: get("profile"),
                         prompt: get("prompt"),
                         skill,
+                        continue_session: match get("continue").as_deref() {
+                            None | Some("false") => false,
+                            Some("true") => true,
+                            Some(v) => {
+                                bail!("node {}: continue={v:?} is not true or false", node.id)
+                            }
+                        },
                     }
                 }
                 "parallelogram" => NodeKind::Command {
@@ -290,14 +301,76 @@ impl Team {
             });
         }
 
-        Ok(Team {
+        let team = Team {
             name: graph.name.clone(),
             roles,
             links,
             max_visits,
             handoff_tokens,
             session_tokens,
-        })
+        };
+        let steps = team.steps();
+        if let Some(first) = steps.first() {
+            let n = team.count(first);
+            if let Some(odd) = steps.iter().find(|r| team.count(r) != n) {
+                bail!(
+                    "step `{odd}` has count {}; every worker step needs the count of `{first}` ({n})",
+                    team.count(odd)
+                );
+            }
+        }
+        Ok(team)
+    }
+
+    /// Whether `role` is a worker step: an agent other than the orchestrator that routes `submit`.
+    pub fn is_step(&self, role: &str) -> bool {
+        role != "orchestrator"
+            && matches!(
+                self.roles.get(role).map(|r| &r.kind),
+                Some(NodeKind::Agent { .. })
+            )
+            && !self.routes(role, TeamEvent::Submit).is_empty()
+    }
+
+    /// Worker steps in order: the dispatch target, then each step a pass path reaches.
+    pub fn steps(&self) -> Vec<String> {
+        let Some(first) = self
+            .routes("orchestrator", TeamEvent::Dispatch)
+            .first()
+            .map(|l| l.to.clone())
+        else {
+            return Vec::new();
+        };
+        let mut steps = vec![first.clone()];
+        let mut seen = vec![first.clone()];
+        let mut at = first;
+        loop {
+            let next = self
+                .routes(&at, TeamEvent::Submit)
+                .into_iter()
+                .chain(self.routes(&at, TeamEvent::Pass))
+                .map(|l| l.to.clone())
+                .find(|to| !seen.contains(to));
+            let Some(to) = next else { break };
+            seen.push(to.clone());
+            if self.is_step(&to) {
+                steps.push(to.clone());
+            }
+            at = to;
+        }
+        steps
+    }
+
+    /// The agent definition and `continue=` of agent node `role`.
+    pub fn agent_of(&self, role: &str) -> Option<(&str, bool)> {
+        match self.roles.get(role).map(|r| &r.kind) {
+            Some(NodeKind::Agent {
+                agent,
+                continue_session,
+                ..
+            }) => Some((agent.as_str(), *continue_session)),
+            _ => None,
+        }
     }
 
     /// The node's `skill=` for `role`.
@@ -459,7 +532,8 @@ mod tests {
                 count: 1,
                 profile: None,
                 prompt: None,
-                skill: None
+                skill: None,
+                continue_session: false
             }
         );
         assert_eq!(

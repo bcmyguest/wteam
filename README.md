@@ -155,6 +155,11 @@ A ticket's optional `**Skill:**` and `**Review skill:**` lines, and a node's
 `skill=` attribute, name a skill for the worker or reviewers. Every brief, review
 request and fix request opens with "Use the `<skill>` skill for this turn", so the
 instruction survives session reuse.
+
+A team can chain worker steps: a PASS that reaches another worker node hands the
+ticket to that step, and the ticket commits once after the last step passes.
+`continue=true` on a step reuses the previous step's session while it fits. See
+[Concepts](https://bcmyguest.github.io/wteam/concepts/#multi-step-teams).
 A pass path that reaches a reviewer who already passed the round blocks the ticket
 as a pass cycle.
 

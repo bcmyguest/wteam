@@ -63,6 +63,7 @@ Every command accepts `--root`, `--slug`, `--agent` and `--json`. Run
 | `profile` | node | Overrides the agent's permission profile |
 | `prompt` | node | Appended to the agent's role prompt under `## Role focus`; inline text or `@path` relative to the repo root |
 | `skill` | node | Skill named in every brief and review request this role receives, alongside the ticket's `Skill:` / `Review skill:` |
+| `continue` | node | `true` on a worker step: take over the previous step's session when it is under `session_tokens` and both steps use the same agent definition |
 | `shape` | node | `box` agent, `parallelogram` command, `hexagon` human gate |
 | `script` | command node | Script run from the repo root |
 | `timeout` | command node | Seconds before the script counts as failed. Default 600. |

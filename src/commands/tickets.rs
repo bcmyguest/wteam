@@ -338,6 +338,7 @@ pub fn requeue(g: &Global, a: &RequeueArgs) -> Result<Out> {
         }
         if a.fresh {
             engine::discard_preserved(&paths, s, &ticket)?;
+            s.ticket_mut(&ticket).step = None;
         }
         let ts = s.ticket_mut(&ticket);
         ts.status = TicketStatus::Todo;

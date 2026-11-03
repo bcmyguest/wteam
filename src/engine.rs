@@ -399,7 +399,17 @@ fn dispatch_role(ctx: &Ctx) -> String {
         .map_or_else(|| "worker".to_string(), |l| l.to.clone())
 }
 
-/// The worker brief: ticket, round, earlier findings and notes, and how to report back.
+/// The worker instance of ticket `id`'s current step on its pair.
+fn step_worker(ctx: &Ctx, id: &str) -> Result<String> {
+    let st = crate::state::load(&ctx.paths)?;
+    let ts = st.tickets.get(id);
+    let role = ts
+        .and_then(|ts| ts.step.clone())
+        .unwrap_or_else(|| dispatch_role(ctx));
+    let pair = ts.and_then(|ts| ts.pair).unwrap_or(1);
+    Ok(crate::team::instance_id(&role, pair))
+}
+
 /// The skills `instance` uses on this turn: its node's `skill=`, then the ticket's own.
 fn skill_line(ctx: &Ctx, instance: &str, ticket_skill: Option<&str>) -> String {
     let (role, _) = parse_instance(instance);
@@ -426,6 +436,7 @@ fn skill_line(ctx: &Ctx, instance: &str, ticket_skill: Option<&str>) -> String {
     )
 }
 
+/// The worker brief: ticket, round, earlier findings and notes, and how to report back.
 fn brief(
     t: &Ticket,
     round: u32,
@@ -530,6 +541,8 @@ enum Hop {
     Human { role: String },
     /// A command gate runs before the next hop.
     Check { node: String, index: u32 },
+    /// The next worker step takes the ticket, on the ticket's own pair.
+    Step { role: String },
     /// Nothing follows: commit.
     Commit,
 }
@@ -550,9 +563,11 @@ fn pass_hop(ctx: &Ctx, role: &str, index: u32) -> Result<Hop> {
                 .first()
                 .copied()
                 .context("pass link has no target")?;
-            Ok(Hop::Review {
-                role: link.to.clone(),
-                index,
+            let role = link.to.clone();
+            Ok(if ctx.team.is_step(&role) {
+                Hop::Step { role }
+            } else {
+                Hop::Review { role, index }
             })
         }
         Some(NodeKind::Agent { .. }) => Ok(Hop::Commit),
@@ -577,7 +592,7 @@ fn review_chain(ctx: &Ctx, start: &str) -> Vec<String> {
         }
         seen.push(to.clone());
         match ctx.team.roles.get(&to).map(|r| &r.kind) {
-            Some(NodeKind::Agent { .. }) if to == "orchestrator" => break,
+            Some(NodeKind::Agent { .. }) if to == "orchestrator" || ctx.team.is_step(&to) => break,
             Some(NodeKind::Agent { .. }) => chain.push(to.clone()),
             Some(_) => {}
             None => break,
@@ -865,7 +880,9 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         } else {
             None
         };
-        let agent = crate::team::instance_id(&role, n);
+        // A ticket requeued mid-pipeline resumes at its step, keeping earlier steps' extras.
+        let step = s.ticket_mut(&t.id).step.clone();
+        let agent = crate::team::instance_id(step.as_deref().unwrap_or(&role), n);
         let prior = s.ticket_mut(&t.id).clone();
         let ts = s.ticket_mut(&t.id);
         ts.status = TicketStatus::Doing;
@@ -874,7 +891,9 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         ts.blocked_reason = None;
         ts.dispatch_failures = 0;
         ts.passes.clear();
-        ts.extras.clear();
+        if step.is_none() {
+            ts.extras.clear();
+        }
         Ok((
             agent,
             ts.rounds + 1,
@@ -1236,12 +1255,7 @@ fn advance_passed(
                 _ => bail!("`{node}` is not a command node"),
             };
             if let Some(out) = run_check(&ticket_dir(ctx, &t.id)?, &script, &t.id, timeout)? {
-                let pair = crate::state::load(&ctx.paths)?
-                    .tickets
-                    .get(&t.id)
-                    .and_then(|ts| ts.pair)
-                    .unwrap_or(1);
-                let worker = crate::team::instance_id(&dispatch_role(ctx), pair);
+                let worker = step_worker(ctx, &t.id)?;
                 return gate_failed(ctx, t, &node, by, TicketStatus::Review, &worker, out);
             }
             let next = pass_hop(ctx, &node, index)?;
@@ -1287,8 +1301,69 @@ fn advance_passed(
             );
             Ok(())
         }),
+        Hop::Step { role } => start_step(ctx, t, by, &role, notes),
         Hop::Commit => finish_pass(ctx, t, by, notes),
     }
+}
+
+/// Hand a passed ticket to the next worker step on the same pair. With `continue=true` on that
+/// step, the previous step's session moves to it when both run the same agent definition and the
+/// session is under `session_tokens`; otherwise the step starts fresh.
+fn start_step(ctx: &Ctx, t: &Ticket, by: &str, role: &str, notes: &[String]) -> Result<()> {
+    let prev = step_worker(ctx, &t.id)?;
+    let (prev_role, pair) = parse_instance(&prev);
+    let next = crate::team::instance_id(role, pair);
+    let carry = match (ctx.team.agent_of(&prev_role), ctx.team.agent_of(role)) {
+        (Some((a, _)), Some((b, true))) => a == b,
+        _ => false,
+    };
+    crate::state::with_state(&ctx.paths, |s| {
+        let ts = s.ticket_mut(&t.id);
+        ts.status = TicketStatus::Doing;
+        ts.assignee = Some(next.clone());
+        ts.step = Some(role.to_string());
+        ts.rounds = 0;
+        ts.last_verdict = None;
+        ts.passes.clear();
+        if carry {
+            let old = s.agents.get(&prev).cloned().unwrap_or_default();
+            let fits = old
+                .context_tokens
+                .is_some_and(|n| n < ctx.team.session_tokens);
+            if fits && old.session_id.is_some() {
+                let to = s.agents.entry(next.clone()).or_default();
+                to.session_id = old.session_id;
+                to.session_turns = old.session_turns;
+                to.context_tokens = old.context_tokens;
+                to.session_ticket = old.session_ticket;
+                if let Some(from) = s.agents.get_mut(&prev) {
+                    from.session_id = None;
+                    from.session_turns = 0;
+                    from.context_tokens = None;
+                    from.session_ticket = None;
+                }
+            }
+        }
+        Ok(())
+    })?;
+    let mut note = format!(
+        "Step `{role}`: step `{prev_role}` passed review. Build on the work already in this checkout.\n"
+    );
+    if !notes.is_empty() {
+        note.push_str("Reviewer notes from the last step:\n");
+        notes
+            .iter()
+            .for_each(|n| note.push_str(&format!("- {n}\n")));
+    }
+    let body = brief(
+        t,
+        1,
+        None,
+        Some(&note),
+        &format!("{}{}", contract_note(ctx), project_notes(ctx)?),
+        &skill_line(ctx, &next, t.skill.as_deref()),
+    );
+    mail_and_deliver(ctx, &next, by, &t.id, &body)
 }
 
 /// Commit the ticket, then under worktree isolation merge it onto main. Returns the landed sha,
@@ -1324,7 +1399,8 @@ fn land(ctx: &Ctx, t: &Ticket) -> Result<worktree::MergeOutcome> {
 
 /// Commit a passed ticket once every reviewer on its pass chain has passed this round.
 fn finish_pass(ctx: &Ctx, t: &Ticket, by: &str, notes: &[String]) -> Result<()> {
-    let first = first_reviewer(ctx, &dispatch_role(ctx))?;
+    let (step, _) = parse_instance(&step_worker(ctx, &t.id)?);
+    let first = first_reviewer(ctx, &step)?;
     let passes = crate::state::load(&ctx.paths)?
         .tickets
         .get(&t.id)
@@ -1352,6 +1428,7 @@ fn finish_pass(ctx: &Ctx, t: &Ticket, by: &str, notes: &[String]) -> Result<()> 
         let ts = s.ticket_mut(&t.id);
         ts.status = TicketStatus::Done;
         ts.commit = Some(sha.clone());
+        ts.step = None;
         let pair = ts.pair;
         s.push_event(
             EventKind::Passed,
@@ -1363,7 +1440,7 @@ fn finish_pass(ctx: &Ctx, t: &Ticket, by: &str, notes: &[String]) -> Result<()> 
     })?;
     if !notes.is_empty() {
         // Delivered with the worker's next brief; a finished ticket needs no turn.
-        let worker = crate::team::instance_id(&dispatch_role(ctx), pair.unwrap_or(1));
+        let worker = crate::team::instance_id(&step, pair.unwrap_or(1));
         let mut body = format!("Reviewer notes on passed ticket {}:\n", t.id);
         notes
             .iter()
@@ -1397,7 +1474,7 @@ fn landing_conflict(ctx: &Ctx, t: &Ticket, by: &str, paths: &[String]) -> Result
     if let Err(e) = worktree::restage_on_main(&ctx.paths, pair, &t.id) {
         return block(ctx, by, &t.id, &format!("{e:#}"));
     }
-    let worker = crate::team::instance_id(&dispatch_role(ctx), pair);
+    let worker = step_worker(ctx, &t.id)?;
     // Mail before the state flip, as in `fail_round`: the worker reads the mail on its turn.
     let body = format!(
         "Landing ticket {} conflicted with main in: {listed}. wteam moved your work onto current \
@@ -1462,7 +1539,13 @@ pub fn verdict(ctx: &Ctx, agent: &str, ticket: &str, verdict: Verdict) -> Result
                         .first()
                         .map(|i| crate::team::instance_id(&l.to, *i))
                 })
-                .unwrap_or_else(|| crate::team::instance_id("worker", pair));
+                .unwrap_or_else(|| {
+                    let role = crate::state::load(&ctx.paths)
+                        .ok()
+                        .and_then(|s| s.tickets.get(&t.id).and_then(|ts| ts.step.clone()))
+                        .unwrap_or_else(|| dispatch_role(ctx));
+                    crate::team::instance_id(&role, pair)
+                });
             fail_round(ctx, &t, agent, &worker, verdict, TicketStatus::Review)
         }
     }
