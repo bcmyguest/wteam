@@ -123,6 +123,7 @@ mod tests {
             verify: vec![],
             skill: None,
             review_skill: None,
+            start_at: None,
             criteria: vec![],
             path: PathBuf::new(),
             body: String::new(),

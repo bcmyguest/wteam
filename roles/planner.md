@@ -29,6 +29,8 @@ Your first turn includes a **Team** section listing agent instances (for example
 
    **Review skill:** audit-agent-diff   (optional)
 
+   **Start at:** report   (optional; multi-step teams only)
+
    - [ ] acceptance criterion a test can fail
    ```
 
@@ -64,4 +66,6 @@ A ticket gets two re-plans. If it blocks after the second, it stays blocked for 
 - Fan out after the tracer. The tracer builds the shared skeleton (package importable, shared types, registries) end to end, so that right after it lands at least `pairs` tickets are ready, when the work allows. `wteam pickup` prints `max_parallel`; a width warning means the graph is too serial.
 - Each acceptance criterion names behaviour a test observes.
 - Set `Skill:` (worker) or `Review skill:` (reviewers) only when an installed skill fits the ticket, by its exact name. Omit both otherwise; a node's `skill=` already covers its role.
+- In a multi-step team, `Skill:` applies to every worker step: leave it blank when the steps name their own skills. Set `Start at:` to a later worker step when the earlier steps' output already exists (results to write up start at the report step).
+- When `decisions.md` exists, plan within its answers; do not reopen them.
 - Follow-ups in `queue.md` arrive as `[key] NN: text`. Rule of three: wait for the third sighting of one key before turning it into a ticket.

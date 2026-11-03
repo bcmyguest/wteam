@@ -19,6 +19,8 @@
 //!
 //! **Review skill:** audit-agent-diff (optional, wteam extension: every reviewer's skill)
 //!
+//! **Start at:** report              (optional, wteam extension: first worker step to run)
+//!
 //! - [ ] Acceptance criterion
 //! ```
 
@@ -46,6 +48,8 @@ pub struct Ticket {
     pub skill: Option<String>,
     /// Skill each reviewer uses on every turn for this ticket.
     pub review_skill: Option<String>,
+    /// Worker step of a multi-step team the ticket starts at, skipping the earlier steps.
+    pub start_at: Option<String>,
     /// `(checked, text)` acceptance criteria.
     pub criteria: Vec<(bool, String)>,
     pub path: PathBuf,
@@ -64,6 +68,7 @@ enum Field {
     Verify,
     Skill,
     ReviewSkill,
+    StartAt,
 }
 
 /// Split `**Label:** rest` into the label and the rest of the line.
@@ -132,7 +137,7 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
         String::new(),
         String::new(),
     );
-    let (mut skill, mut review_skill) = (String::new(), String::new());
+    let (mut skill, mut review_skill, mut start_at) = (String::new(), String::new(), String::new());
     let mut criteria = Vec::new();
     let mut field = Field::None;
     let mut in_criteria = false;
@@ -179,6 +184,7 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
                 "verify" => Field::Verify,
                 "skill" => Field::Skill,
                 "review skill" => Field::ReviewSkill,
+                "start at" => Field::StartAt,
                 _ => Field::None,
             };
             let target = match field {
@@ -189,6 +195,7 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
                 Field::Verify => &mut verify,
                 Field::Skill => &mut skill,
                 Field::ReviewSkill => &mut review_skill,
+                Field::StartAt => &mut start_at,
                 Field::None => continue,
             };
             target.push_str(rest);
@@ -202,6 +209,7 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
             Field::Verify => &mut verify,
             Field::Skill => &mut skill,
             Field::ReviewSkill => &mut review_skill,
+            Field::StartAt => &mut start_at,
             Field::None => continue,
         };
         if !line.trim().is_empty() {
@@ -225,6 +233,7 @@ pub fn parse_ticket(markdown: &str, path: &Path) -> Result<Ticket> {
         verify: split_list(&verify, ';'),
         skill: skill_name(&skill),
         review_skill: skill_name(&review_skill),
+        start_at: skill_name(&start_at),
         criteria,
         path: path.to_path_buf(),
         body: markdown.to_string(),
@@ -626,6 +635,9 @@ mod tests {
         assert_eq!(k.skill.as_deref(), Some("diagnose-failure"));
         assert_eq!(k.review_skill.as_deref(), Some("audit-agent-diff"));
         assert_eq!(k.verify, ["cargo test -p x", "cargo clippy"]);
+        assert_eq!(k.start_at, None);
+        let k = parse(&TEMPLATE.replace("**Verify:**", "**Start at:** `report`\n\n**Verify:**"));
+        assert_eq!(k.start_at.as_deref(), Some("report"));
         assert!(is_skill_name("plugin:skill-1"));
         assert!(!is_skill_name("Diagnose failure"));
     }
@@ -641,6 +653,7 @@ mod tests {
             verify: vec![],
             skill: None,
             review_skill: None,
+            start_at: None,
             criteria: vec![],
             path: PathBuf::from(format!("{id}.md")),
             body: String::new(),

@@ -808,6 +808,16 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
     // Everything fallible that is not state lives before phase 1, so a failure here leaves the
     // ticket untouched.
     let notes = project_notes(ctx)?;
+    if let Some(start) = &t.start_at
+        && !ctx.team.is_step(start)
+    {
+        bail!(
+            "ticket {}: Start at `{start}` is not a worker step of team `{}` (steps: {})",
+            t.id,
+            ctx.team.name,
+            ctx.team.steps().join(", ")
+        );
+    }
     // Phase 1, under the state lock: pick the pair, prepare its worktree and mark the ticket
     // `Doing` on it. `Doing` keeps the pair busy, so no other dispatch takes it while the hook
     // runs in phase 2.
@@ -880,8 +890,10 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         } else {
             None
         };
-        // A ticket requeued mid-pipeline resumes at its step, keeping earlier steps' extras.
-        let step = s.ticket_mut(&t.id).step.clone();
+        // A ticket requeued mid-pipeline resumes at its step, keeping earlier steps' extras; a
+        // fresh one starts at its `Start at:` step, else the first.
+        let resumed = s.ticket_mut(&t.id).step.clone();
+        let step = resumed.clone().or_else(|| t.start_at.clone());
         let agent = crate::team::instance_id(step.as_deref().unwrap_or(&role), n);
         let prior = s.ticket_mut(&t.id).clone();
         let ts = s.ticket_mut(&t.id);
@@ -891,7 +903,8 @@ pub fn dispatch(ctx: &Ctx, ticket: &str, pair: Option<u32>) -> Result<String> {
         ts.blocked_reason = None;
         ts.dispatch_failures = 0;
         ts.passes.clear();
-        if step.is_none() {
+        ts.step = step.clone();
+        if resumed.is_none() {
             ts.extras.clear();
         }
         Ok((

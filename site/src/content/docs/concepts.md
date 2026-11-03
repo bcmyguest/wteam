@@ -94,8 +94,10 @@ pass. A FAIL goes back to the step whose reviewer failed it. Every step needs th
 first step's `count`. `continue=true` on a step moves the previous step's session
 to it when the session fits under `session_tokens`; a resumed session skips the
 new step's role prompt, so put per-step instructions in `skill=`.
-A blocked ticket that is requeued resumes at its step, with the requeue note in
-its brief; `requeue --fresh` discards the work and starts again at the first step.
+A ticket's `**Start at:** <step>` skips the earlier steps, for work whose earlier
+output already exists. A blocked ticket that is requeued resumes at its step, with
+the requeue note in its brief; `requeue --fresh` discards the work and starts again
+at its first step.
 
 ```dot
 plan     [agent="worker", count="$pairs", skill="plan-experiment"]

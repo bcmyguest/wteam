@@ -219,6 +219,41 @@ fn a_fresh_requeue_starts_again_at_the_first_step() {
     assert_eq!(agents(&r), ["plan.1", "run.1", "plan.1", "run.1"]);
 }
 
+fn start_at(r: &Repo, step: &str) {
+    let path = r.path().join(".wteam/demo/tickets/01-add-thing.md");
+    let md = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        md.replace(
+            "**Verify:**",
+            &format!("**Start at:** {step}\n\n**Verify:**"),
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn start_at_skips_the_earlier_steps() {
+    let r = repo(&team("", false));
+    start_at(&r, "run");
+    run_to_done(&r);
+    assert_eq!(agents(&r), ["run.1"]);
+}
+
+#[test]
+fn start_at_an_unknown_step_fails_the_dispatch() {
+    let r = repo(&team("", false));
+    start_at(&r, "plan_rev");
+    r.wteam()
+        .args(["dispatch", "01"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "ticket 01: Start at `plan_rev` is not a worker step of team `steps` (steps: plan, run)",
+        ));
+    assert_ne!(r.state()["tickets"]["01"]["status"], "doing");
+}
+
 #[test]
 fn every_step_needs_the_first_steps_count() {
     let r = Repo::new("demo");

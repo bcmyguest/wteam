@@ -13,13 +13,15 @@ Send one plain-text message asking for the goal, the complexity (S, M or L), and
 
 Derive `<slug>` from the goal: kebab-case, at most 4 words. Pass `--slug <slug>` to every `wteam` command that follows.
 
-Done when the user has answered, the team and extra phases are settled, and you hold the slug.
+When the goal leaves a costly-to-reverse choice open (architecture, data model, API shape, dependency, persistence, concurrency), settle it now, in this conversation, before any planning: look up the facts per option yourself (the `research-options` skill when installed), then ask the decisions in dependency-ordered rounds (the `resolve-design-decisions` skill). Write question, options, answer and round to `.wteam/<slug>/decisions.md`.
+
+Done when the user has answered, the team and extra phases are settled, open design decisions are recorded, and you hold the slug.
 
 ## 2. Plan
 
 Planning already happened (tickets in `.scratch/<slug>`): run `wteam pickup --from .scratch/<slug> --slug <slug>`.
 
-Otherwise spawn the planner with the prompt from `wteam role planner` (stdout; `--json` returns it as `text`), plus the goal, the slug, the chosen team's name and description so tickets suit its reviewers, and the names of installed skills that fit the work so it can set `Skill:` / `Review skill:` per ticket. Model: sonnet (or the harness's medium model) for S and M, opus (the big model) for L.
+Otherwise spawn the planner with the prompt from `wteam role planner` (stdout; `--json` returns it as `text`), plus the goal, the slug, the chosen team's name and description so tickets suit its reviewers, the names of installed skills that fit the work so it can set `Skill:` / `Review skill:` per ticket, and `.wteam/<slug>/decisions.md` when intake wrote one. Model: sonnet (or the harness's medium model) for S and M, opus (the big model) for L.
 
 - Claude Code: spawn a subagent whose prompt is the role prompt.
 - Codex: `codex exec -m <model> "<role prompt>"`.
